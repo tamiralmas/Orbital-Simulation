@@ -111,12 +111,16 @@
    * vector toward the light (Sun); jd: displayed UTC Julian date; basis:
    * {Rt, Up, F} camera basis (world); emissive: skip lighting (the Sun).
    */
-  function spriteFor(body, rPx, Lw, jd, basis, emissive) {
+  function spriteFor(body, rPx, Lw, jd, basis, emissive, moving) {
     const tex = maps[body.id];
     if (!tex) return null;
     const frame = A && typeof A.bodyFrameAt === "function" ? A.bodyFrameAt(body, jd) : null;
     if (!frame) return null;
-    const requestedR = Math.max(4, Math.min(Math.round(rPx), MAX_R));
+    // During playback/dragging, render a smaller derived globe more often.
+    // This both lowers CPU cost and removes the coarse orientation jumps that
+    // made close Earth views jitter while a pad/trajectory moved smoothly.
+    const radiusLimit = moving ? 190 : MAX_R;
+    const requestedR = Math.max(4, Math.min(Math.round(rPx), radiusLimit));
     // Auto camera easing used to miss the cache at every one-pixel radius
     // change and rebuild a 600x600 shaded globe repeatedly. Bucket only the
     // derived sprite resolution; drawImage still scales it to the exact disk.
@@ -126,9 +130,13 @@
     // quantization coarsens for small apparent sizes (rotation/lighting
     // detail is invisible below ~40 px, so don't rebuild sprites for it)
     const small = R < 40;
-    const qs = small ? 0.5 : 0.06;      // spin buckets
+    // Keep orientation quantization below roughly three quarters of one
+    // derived-sprite pixel. Fixed angular buckets made geography visibly step
+    // beneath a launch pad when a close globe or the camera rotated.
+    const angularBucket = Math.max(0.003, Math.min(0.02, 0.75 / R));
+    const qs = small ? 0.5 : angularBucket; // spin buckets
     const ql = small ? 0.15 : 0.06;     // light buckets
-    const qb = small ? 0.12 : 0.04;     // camera-basis buckets
+    const qb = small ? 0.12 : angularBucket; // camera-basis buckets
     const key = body.id + "|" + R + "|" + (emissive ? "e" : (
       q(Lw[0], ql) + "," + q(Lw[1], ql) + "," + q(Lw[2], ql))) +
       "|" + q(frame.phase, qs) +
@@ -140,7 +148,8 @@
     const nowMs = globalThis.performance && typeof globalThis.performance.now === "function"
       ? globalThis.performance.now() : Date.now();
     const large = R >= 96;
-    if (_last[body.id] && ((nowMs - (_lastBuildMs[body.id] || 0)) < SPRITE_REFRESH_MS ||
+    const refreshMs = moving ? 45 : SPRITE_REFRESH_MS;
+    if (_last[body.id] && ((nowMs - (_lastBuildMs[body.id] || 0)) < refreshMs ||
         (large && _largeBuilds >= 1))) return _last[body.id];
     // over budget this frame → serve the previous sprite instead of stalling
     if (_builds >= 2 && _last[body.id]) return _last[body.id];

@@ -164,7 +164,17 @@
     const events = result && result.events || [];
     const paced = events.filter((event) => isAutoEvent(event, AUTOPACE_EVENTS));
     S.evT = paced.map((event) => event.t);
-    S.evW = paced.map((event) => event._burn && event._burn.handoff ? 180 : 70);
+    S.evP = paced.map(autoEventProfile);
+    S.evW = S.evP.map((profile) => profile.windowS);
+    const observeBySegment = new Map();
+    for (const event of events) {
+      if (event.kind !== "obs" || !isFinite(event.t)) continue;
+      const window = observeBySegment.get(event.seg);
+      if (window) window.end = Math.max(window.end, event.t);
+      else observeBySegment.set(event.seg, { start: event.t, end: event.t });
+    }
+    S.obsWindows = Array.from(observeBySegment.values()).filter((window) =>
+      window.end > window.start);
     S.camEvT = events.filter((event) =>
       isAutoEvent(event, AUTOCAM_SHOT_EVENTS)).map((event) => event.t);
   }
@@ -287,11 +297,13 @@
       const toggle = $("optLagrange");
       if (toggle) toggle.checked = false;
     }
+    updateHud();
     // choose an initial view
     if (!S.autoCam) {
       if (viewHint === "solar" || m.segments.some((s) => s.type === "depart")) viewSolar();
       else viewMission();
     } else {
+      resetAutoCamera(true);
       const initial = currentSample();
       if (initial) {
         S.camera.focusMode = "ship";
@@ -2981,14 +2993,27 @@
    * shots for long cruises. Locks focus exactly to a body or spacecraft,
    * eases distance, and switches the display frame at deliberate cuts.
    * Any manual camera input hands control back to the user.                */
-  // Only mission-defining events alter pacing. Apsides, SOI boundaries, and
-  // observation markers stay on the timeline but no longer make the clock
-  // repeatedly brake for what looks like no visible reason.
+  // Only mission-defining events alter pacing. Observation boundaries receive
+  // their own long dwell; apsides and ordinary SOI markers stay on the
+  // timeline without repeatedly braking the clock.
   const AUTOPACE_EVENTS = new Set(["burn", "flyby", "launch", "landing", "liftoff",
-    "entry", "splashdown", "impact", "separation", "rendezvous", "dock", "undock"]);
+    "entry", "splashdown", "impact", "separation", "rendezvous", "dock", "undock", "obs"]);
   const AUTOCAM_SHOT_EVENTS = new Set(["burn", "flyby", "launch", "landing", "liftoff",
     "entry", "splashdown", "impact", "separation", "rendezvous", "dock", "undock"]);
   const isAutoEvent = (event, kinds) => kinds.has(event.kind) && !event.patchCorrection;
+  const AUTO_EVENT_PROFILES = Object.freeze({
+    default: Object.freeze({ windowS: 100, divisor: 320, minRate: 30 }),
+    handoff: Object.freeze({ windowS: 240, divisor: 320, minRate: 30 }),
+    flyby: Object.freeze({ windowS: 900, divisor: 320, minRate: 30 }),
+    observe: Object.freeze({ windowS: 420, divisor: 320, minRate: 30 }),
+  });
+
+  function autoEventProfile(event) {
+    if (event && event._burn && event._burn.handoff) return AUTO_EVENT_PROFILES.handoff;
+    if (event && event.kind === "flyby") return AUTO_EVENT_PROFILES.flyby;
+    if (event && event.kind === "obs") return AUTO_EVENT_PROFILES.observe;
+    return AUTO_EVENT_PROFILES.default;
+  }
 
   function setAutoCam(on, silent) {
     if (S.autoCam === on) return;
@@ -3028,7 +3053,7 @@
     let f = 1;
     const result = activeVehicleResult();
     for (const e of result && result.events || []) {
-      if (!isAutoEvent(e, AUTOPACE_EVENTS)) continue;
+      if (!isAutoEvent(e, AUTOCAM_SHOT_EVENTS)) continue;
       const d = e.t - S.tNow;
       if (d >= 0 && d < W) f = Math.min(f, Math.max(0.08, Math.pow(d / W, 0.8)));
       else if (d < 0 && d > -0.35 * W)
@@ -3043,8 +3068,16 @@
    * events. The bounded step guard prevents crossing a crawl zone.         */
   function gapCruiseRate(gap) {
     // real seconds allotted to a gap grow ~logarithmically with its length
-    const tReal = Math.min(12, Math.max(2.8, 3.4 + 1.35 * Math.log10(gap / DAY + 0.02)));
+    const tReal = Math.min(20, Math.max(4.5, 5.4 + 1.8 * Math.log10(gap / DAY + 0.02)));
     return gap / tReal;
+  }
+  function observationRateCap(tAt) {
+    for (const window of S.obsWindows || []) {
+      if (tAt >= window.start && tAt <= window.end)
+        return Math.max(AUTO_EVENT_PROFILES.observe.minRate,
+          (window.end - window.start) / 18);
+    }
+    return Infinity;
   }
   function autoRate(tAt, resultOverride) {
     const tRef = tAt === undefined ? S.tNow : tAt;
@@ -3058,19 +3091,23 @@
     const next = lo < T.length ? T[lo] : tEnd;
     const gap = Math.max(next - prev, 1);
     const cruise = gapCruiseRate(gap);
-    // Scale-aware crawl: roughly 320x below cruise (min 30 s/s). The 2.5
-    // coefficient starts each approach about five nominal real seconds out
-    // (integral of the square-root ramp), instead of braking at the last beat.
-    const floorR = Math.max(30, cruise / 320);
+    const profiles = S.evP || [];
     const W = S.evW || [];
-    const ramp = (d, wBase) => {
-      const w = Math.max(wBase, floorR * 1.8);
+    const ramp = (d, profile, wBase) => {
+      const floorR = Math.max(profile.minRate, cruise / profile.divisor);
+      const w = Math.max(wBase, floorR * 2.4);
       return Math.min(cruise,
-        floorR + Math.sqrt(Math.max(d - w, 0) * cruise / 2.5));
+        floorR + Math.sqrt(Math.max(d - w, 0) * cruise / 3.0));
     };
-    const rPrev = lo > 0 ? ramp(tRef - prev, W[lo - 1] !== undefined ? W[lo - 1] : 70) : Infinity;
-    const rNext = ramp(next - tRef, lo < T.length && W[lo] !== undefined ? W[lo] : 70);
-    return Math.min(Math.min(rPrev, rNext), Math.max(cruise, floorR));
+    const prevProfile = lo > 0 && profiles[lo - 1] || AUTO_EVENT_PROFILES.default;
+    const nextProfile = lo < T.length && profiles[lo] || AUTO_EVENT_PROFILES.default;
+    const rPrev = lo > 0
+      ? ramp(tRef - prev, prevProfile,
+        W[lo - 1] !== undefined ? W[lo - 1] : prevProfile.windowS)
+      : Infinity;
+    const rNext = ramp(next - tRef, nextProfile,
+      lo < T.length && W[lo] !== undefined ? W[lo] : nextProfile.windowS);
+    return Math.min(rPrev, rNext, cruise, observationRateCap(tRef));
   }
   let lastRate = 21600;
   let rateSmooth = null;
@@ -3087,9 +3124,9 @@
     const target = S.speedMode === "auto" ? autoRate() : S.speed * dwellFactor();
     if (S.speedMode !== "auto") { lastRate = target; return target; }
     if (rateSmooth == null || !isFinite(rateSmooth) || rateSmooth <= 0) rateSmooth = target;
-    // Glide between rates in log-space. A two-second brake and three-second
-    // acceleration keep large compression changes legible without skipping.
-    const tau = target < rateSmooth ? 2.0 : 3.0;
+    // Brake deliberately, then restore cruise more slowly so Auto Time does
+    // not surge away from flybys, observations, or gravity assists.
+    const tau = target < rateSmooth ? 1.5 : 5.0;
     const k = 1 - Math.exp(-(dt || 0.016) / tau);
     rateSmooth = Math.exp(Math.log(rateSmooth) +
       (Math.log(Math.max(target, 1)) - Math.log(rateSmooth)) * k);
@@ -3106,14 +3143,16 @@
       while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] <= S.tNow) lo = m + 1; else hi = m; }
       if (lo < T.length) {
         const dNext = T[lo] - S.tNow;
-        const crawlR = Math.max(autoRate(Math.max(T[lo] - 1, 0)), 30); // approximately the event floor
-        const w = Math.max(S.evW && S.evW[lo] !== undefined ? S.evW[lo] : 70, crawlR * 1.8);
+        const profile = S.evP && S.evP[lo] || AUTO_EVENT_PROFILES.default;
+        const crawlR = Math.max(autoRate(Math.max(T[lo] - 1, 0)), profile.minRate);
+        const w = Math.max(S.evW && S.evW[lo] !== undefined ? S.evW[lo] : profile.windowS,
+          crawlR * 2.4);
         if (dNext > w) {
           // Approach the crawl zone in several bounded steps if a dropped
           // frame arrives with a stale high rate; never teleport to its edge.
           const remain = dNext - w;
-          step = Math.min(step, Math.max(dt * crawlR * 1.15, remain * 0.30));
-        } else step = Math.min(step, Math.max(dt * crawlR * 1.15, 0.001));
+          step = Math.min(step, Math.max(dt * crawlR * 1.10, remain * 0.24));
+        } else step = Math.min(step, Math.max(dt * crawlR * 1.10, 0.001));
       }
     }
     return step;
@@ -3126,11 +3165,62 @@
   }
 
   let shot = { mode: "", since: 0, cen: "" };   // shot latch (anti-churn)
+  function stableAutoDistance(camera, key, desired) {
+    desired = Math.max(+desired || 1, 1);
+    if (camera._autoFitKey !== key || !isFinite(camera._autoFitDist) || camera._autoFitDist <= 0) {
+      camera._autoFitKey = key;
+      camera._autoFitDist = desired;
+      camera._autoFitFresh = true;
+    } else if (desired > camera._autoFitDist * 1.12) {
+      // Open the view promptly as the framed pair grows, retaining margin.
+      camera._autoFitDist = desired * 1.03;
+    } else if (desired < camera._autoFitDist * 0.55) {
+      // Close only after a material scale change. This hysteresis stops
+      // ordinary orbit motion from pumping the zoom in and out.
+      camera._autoFitDist = desired / 0.72;
+    }
+    return camera._autoFitDist;
+  }
+  function autoPairDistance(camera, shipWorld, bodyId, jd, frameBody, extent, key) {
+    const body = BODIES[bodyId] || BODIES.sun;
+    const bodyWorld = A.bodyWorld(body.id, jd);
+    const range = Math.max(V.mag(V.sub(shipWorld, bodyWorld)), body.radius * 1.01);
+    const midpointWorld = V.scale(V.add(shipWorld, bodyWorld), 0.5);
+    const geometry = globalThis.MTPRender && globalThis.MTPRender._test;
+    const midpointDisplay = geometry && geometry.pointInDisplayFrame
+      ? geometry.pointInDisplayFrame(midpointWorld, frameBody, jd, jd, A.bodyWorld)
+      : midpointWorld;
+    camera.focusMode = "free";
+    camera.focusBody = body.id;
+    camera.freeFocus = midpointDisplay;
+    camera.pan = [0, 0, 0];
+    const span = body.radius + 0.5 * Math.max(range, extent || range);
+    const desired = Math.max(span * 1.22 / Math.tan(camera.fov / 2), body.radius * 3.2);
+    return stableAutoDistance(camera, key || ("pair:" + body.id + ":" + frameBody), desired);
+  }
+  function easeAutoDistance(camera, target, dt) {
+    if (camera._autoFitFresh) {
+      camera.dist = target;
+      camera._autoFitFresh = false;
+      return;
+    }
+    if (!isFinite(camera.dist) || camera.dist <= 0) camera.dist = target;
+    // Make space quickly enough to retain the ship; close much more slowly.
+    // The 92% safety floor consumes only the fit margin, not the subject.
+    if (target > camera.dist) camera.dist = Math.max(camera.dist, target * 0.92);
+    const tau = target > camera.dist ? 0.75 : 2.6;
+    const blend = 1 - Math.exp(-Math.max(dt || 0, 0) / tau);
+    camera.dist = Math.exp(Math.log(camera.dist) +
+      (Math.log(Math.max(target, 1)) - Math.log(camera.dist)) * blend);
+  }
   function resetAutoCamera(hard) {
     shot = { mode: "", since: 0, cen: "" };
     if (hard && S.autoCam && S.camera) {
       S.camera.freeFocus = null;
       S.camera.pan = [0, 0, 0];
+      delete S.camera._autoFitKey;
+      delete S.camera._autoFitDist;
+      delete S.camera._autoFitFresh;
     }
   }
   function autoCamTick(dtReal) {
@@ -3153,16 +3243,16 @@
       cam.focusBody = system.secondaryId;
       cam.freeFocus = null;
       cam.pan = [0, 0, 0];
-      const targetDist = Math.max(extent * 5.5, BODIES[system.secondaryId].radius * 8);
-      const k = 1 - Math.exp(-dtReal / 1.15);
-      cam.dist = Math.exp(Math.log(cam.dist) +
-        (Math.log(targetDist) - Math.log(cam.dist)) * k);
+      const targetDist = stableAutoDistance(cam, "cr3bp:" + system.id,
+        Math.max(extent * 5.5, BODIES[system.secondaryId].radius * 8));
+      easeAutoDistance(cam, targetDist, dtReal);
       const wantFrame = "synodic:" + system.id;
       if (S.frameBody !== wantFrame) {
         S.frameBody = wantFrame;
         const selector = $("frameSel");
         if (selector) selector.value = wantFrame;
         globalThis.MTPRender.invalidateCache();
+        updateHud();
       }
       return;
     }
@@ -3200,61 +3290,43 @@
         shot = { mode: want, since: nowR, cen: displayCenId };
     } else shot.cen = displayCenId;
 
-    let dist, focusMode, focusBody = "sun";
+    const wantFrame = displayCenId === "sun" ? "inertial" : displayCenId;
+    let dist;
     if (shot.mode === "observe" && obsT) {
-      // observation: frame the observed body with the ship in view
+      // Observation: keep the observed body and spacecraft in one composition.
       const tw = A.bodyWorld(obsT, jd);
       const range = V.mag(V.sub(smp.w, tw));
-      focusMode = "body"; focusBody = obsT;
-      dist = Math.max(range * 2.7, BODIES[obsT].radius * 5.5);
+      dist = autoPairDistance(cam, displaySmp.w, obsT, jd, wantFrame, range,
+        "observe:" + obsT + ":" + wantFrame);
     } else if (displayCenId !== "sun") {
       const localR = displayCenId === displaySmp.cen ? displaySmp.r
         : V.sub(displaySmp.w, A.bodyWorld(displayCenId, jd));
       const localV = displayCenId === displaySmp.cen ? displaySmp.v : smp.v;
       const rNow = Math.max(V.mag(localR), cen.radius * 1.1);
-      if (shot.mode === "event") {
-        // event close-up: follow the ship near its central body
-        focusMode = "ship";
-        dist = Math.max(rNow * 2.6, cen.radius * 3.8);
-        if (isFinite(cen.soi)) dist = Math.min(dist, cen.soi * 1.8);
-      } else {
-        // Stable local shot: frame the osculating orbit, not the instantaneous
-        // radius, so eccentric coasts do not make the zoom breathe every frame.
-        const coe = A.rvToCoe(localR, localV, cen.mu);
-        let extent = rNow;
-        if (coe.e < 1 && isFinite(coe.ra)) {
-          const cap = isFinite(cen.soi) ? cen.soi * 0.9 : coe.ra;
-          extent = Math.max(rNow, Math.min(coe.ra, cap));
-        }
-        focusMode = "body"; focusBody = displayCenId;
-        dist = Math.max(extent * 3.2, cen.radius * 7.5);
+      // Bound orbits retain an apoapsis-scale view. Escape arcs grow from the
+      // current range so the camera opens continuously instead of jumping.
+      const coe = A.rvToCoe(localR, localV, cen.mu);
+      let extent = rNow;
+      if (coe.e < 1 && isFinite(coe.ra)) {
+        const cap = isFinite(cen.soi) ? cen.soi * 0.9 : coe.ra;
+        extent = Math.max(rNow, Math.min(coe.ra, cap));
       }
+      dist = autoPairDistance(cam, displaySmp.w, displayCenId, jd, wantFrame, extent);
     } else {
-      if (shot.mode === "event") {
-        // deep-space maneuver: pull in around the ship
-        focusMode = "ship";
-        dist = Math.max(V.mag(smp.w) * 0.45, 0.6 * AU);
-      } else {
-        // cruise: wide solar-system shot framing the ship's orbit
-        focusMode = "body"; focusBody = "sun";
-        dist = Math.max(V.mag(smp.w) * 3.1, 3.5 * AU);
-      }
+      // One Sun/spacecraft pair shot covers both cruise and maneuvers. The old
+      // Sun/ship focus switch was the source of Voyager's repeated breathing.
+      const sunWorld = A.bodyWorld("sun", jd);
+      const range = V.mag(V.sub(displaySmp.w, sunWorld));
+      dist = autoPairDistance(cam, displaySmp.w, "sun", jd, wantFrame, range);
     }
 
-    // Body/ship focus modes track moving targets exactly. Only zoom is eased,
-    // eliminating world-coordinate lag that could let the target leave frame.
-    cam.focusMode = focusMode;
-    cam.focusBody = focusBody;
-    cam.freeFocus = null;
-    cam.pan = [0, 0, 0];
-    const kDist = 1 - Math.exp(-dtReal / (shot.mode === "event" ? 0.75 : 1.15));
-    cam.dist = Math.exp(Math.log(cam.dist) + (Math.log(dist) - Math.log(cam.dist)) * kDist);
+    easeAutoDistance(cam, dist, dtReal);
 
-    const wantFrame = displayCenId === "sun" ? "inertial" : displayCenId;
     if (S.frameBody !== wantFrame) {
       S.frameBody = wantFrame;
       $("frameSel").value = wantFrame;
       globalThis.MTPRender.invalidateCache();
+      updateHud();
     }
   }
 
@@ -4605,6 +4677,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
         localTime: (jd - craft.result.epochJD) * DAY,
       }))),
       options: S.options,
+      textureMotion: S.playing || !!drag,
       out,
     };
   }
@@ -5012,7 +5085,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
         times.push(t);
         const tg = autoRate(t, result);
         if (sm == null) sm = tg;
-        const tau = tg < sm ? 2.0 : 3.0;
+        const tau = tg < sm ? 1.5 : 5.0;
         const k = 1 - Math.exp(-dtF / tau);
         sm = Math.exp(Math.log(sm) + (Math.log(Math.max(tg, 1)) - Math.log(sm)) * k);
         let step = dtF * sm;
@@ -5020,13 +5093,15 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
         while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] <= t) lo = m + 1; else hi = m; }
         if (lo < T.length) {
           const dNext = T[lo] - t;
-          const crawlR = Math.max(autoRate(Math.max(T[lo] - 1, tStart), result), 30);
-          const w = Math.max(S.evW && S.evW[lo] !== undefined ? S.evW[lo] : 70,
-            crawlR * 1.8);
+          const profile = S.evP && S.evP[lo] || AUTO_EVENT_PROFILES.default;
+          const crawlR = Math.max(autoRate(Math.max(T[lo] - 1, tStart), result),
+            profile.minRate);
+          const w = Math.max(S.evW && S.evW[lo] !== undefined
+            ? S.evW[lo] : profile.windowS, crawlR * 2.4);
           if (dNext > w) {
             const remain = dNext - w;
-            step = Math.min(step, Math.max(dtF * crawlR * 1.15, remain * 0.30));
-          } else step = Math.min(step, Math.max(dtF * crawlR * 1.15, 0.001));
+            step = Math.min(step, Math.max(dtF * crawlR * 1.10, remain * 0.24));
+          } else step = Math.min(step, Math.max(dtF * crawlR * 1.10, 0.001));
         }
         t += step;
       }
@@ -5047,7 +5122,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
   }
 
   /* trimmed auto-camera for offline (GIF) rendering — same shot rules */
-  function gifAutoCamStep(cam2, result, t, dtF, smp, gshot) {
+  function gifAutoCamStep(cam2, result, t, dtF, smp, gshot, frameBody) {
     const jd = result.epochJD + t / DAY;
     if (smp.cr3bp && globalThis.CR3BP) {
       const system = globalThis.CR3BP.getSystem(smp.cr3bpSystem);
@@ -5062,10 +5137,9 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       cam2.focusBody = system.secondaryId;
       cam2.freeFocus = null;
       cam2.pan = [0, 0, 0];
-      const distance = Math.max(extent * 5.5, BODIES[system.secondaryId].radius * 8);
-      const blend = 1 - Math.exp(-dtF / 1.15);
-      cam2.dist = Math.exp(Math.log(cam2.dist) +
-        (Math.log(distance) - Math.log(cam2.dist)) * blend);
+      const distance = stableAutoDistance(cam2, "cr3bp:" + system.id,
+        Math.max(extent * 5.5, BODIES[system.secondaryId].radius * 8));
+      easeAutoDistance(cam2, distance, dtF);
       return;
     }
     const cen = BODIES[smp.cen];
@@ -5074,7 +5148,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] <= t) lo = m + 1; else hi = m; }
     const dPrev = lo > 0 ? t - T[lo - 1] : Infinity;
     const dNext = lo < T.length ? T[lo] - t : Infinity;
-    const rate = Math.max(autoRate(t, result), 30);
+    const rate = Math.max(autoRate(t, result), 1);
     const dNextR = dNext / rate, dPrevR = dPrev / rate;
     const nearEv = dNextR < 6 || dPrevR < 3 || (gshot.mode === "event" && dNextR < 7);
     const obsT = obsTargetAtT(t);
@@ -5085,40 +5159,28 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
         Object.assign(gshot, { mode: want, sinceT: t, cen: smp.cen });
     } else gshot.cen = smp.cen;
 
-    let dist, focusMode, focusBody = "sun";
+    const displayFrameBody = frameBody || (smp.cen === "sun" ? "inertial" : smp.cen);
+    let dist;
     if (gshot.mode === "observe" && obsT) {
       const tw = A.bodyWorld(obsT, jd);
-      focusMode = "body"; focusBody = obsT;
-      dist = Math.max(V.mag(V.sub(smp.w, tw)) * 2.7, BODIES[obsT].radius * 5.5);
+      const range = V.mag(V.sub(smp.w, tw));
+      dist = autoPairDistance(cam2, smp.w, obsT, jd, displayFrameBody, range,
+        "observe:" + obsT + ":" + displayFrameBody);
     } else if (smp.cen !== "sun") {
       const rNow = Math.max(V.mag(smp.r), cen.radius * 1.1);
-      if (gshot.mode === "event") {
-        focusMode = "ship";
-        dist = Math.max(rNow * 2.6, cen.radius * 3.8);
-        if (isFinite(cen.soi)) dist = Math.min(dist, cen.soi * 1.8);
-      } else {
-        const coe = A.rvToCoe(smp.r, smp.v, cen.mu);
-        let extent = rNow;
-        if (coe.e < 1 && isFinite(coe.ra)) {
-          const cap = isFinite(cen.soi) ? cen.soi * 0.9 : coe.ra;
-          extent = Math.max(rNow, Math.min(coe.ra, cap));
-        }
-        focusMode = "body"; focusBody = smp.cen;
-        dist = Math.max(extent * 3.2, cen.radius * 7.5);
+      const coe = A.rvToCoe(smp.r, smp.v, cen.mu);
+      let extent = rNow;
+      if (coe.e < 1 && isFinite(coe.ra)) {
+        const cap = isFinite(cen.soi) ? cen.soi * 0.9 : coe.ra;
+        extent = Math.max(rNow, Math.min(coe.ra, cap));
       }
-    } else if (gshot.mode === "event") {
-      focusMode = "ship";
-      dist = Math.max(V.mag(smp.w) * 0.45, 0.6 * AU);
+      dist = autoPairDistance(cam2, smp.w, smp.cen, jd, displayFrameBody, extent);
     } else {
-      focusMode = "body"; focusBody = "sun";
-      dist = Math.max(V.mag(smp.w) * 3.1, 3.5 * AU);
+      const sunWorld = A.bodyWorld("sun", jd);
+      const range = V.mag(V.sub(smp.w, sunWorld));
+      dist = autoPairDistance(cam2, smp.w, "sun", jd, displayFrameBody, range);
     }
-    cam2.focusMode = focusMode;
-    cam2.focusBody = focusBody;
-    cam2.freeFocus = null;
-    cam2.pan = [0, 0, 0];
-    const k = 1 - Math.exp(-dtF / (gshot.mode === "event" ? 0.75 : 1.15));
-    cam2.dist = Math.exp(Math.log(cam2.dist) + (Math.log(dist) - Math.log(cam2.dist)) * k);
+    easeAutoDistance(cam2, dist, dtF);
   }
 
   function gifReferenceFrame(camMode, selectedFrame, sample) {
@@ -5166,6 +5228,9 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     const cam2 = Object.assign({}, S.camera);
     cam2.pan = [0, 0, 0];
     cam2.freeFocus = S.camera.freeFocus ? V.clone(S.camera.freeFocus) : null;
+    delete cam2._autoFitKey;
+    delete cam2._autoFitDist;
+    delete cam2._autoFitFresh;
     const gshot = { mode: "", sinceT: 0, cen: "" };
     const selectedFrame = S.frameBody;
     const resumePlayback = !!S.playing;
@@ -5176,7 +5241,8 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       // converge onto the first shot instantly (dt≫τ) so the GIF doesn't
       // open with a slow drift in from wherever the live camera was
       const smp0 = ME.sampleAtTime(exportResult, times[0]);
-      if (smp0) gifAutoCamStep(cam2, exportResult, times[0], 30, smp0, gshot);
+      if (smp0) gifAutoCamStep(cam2, exportResult, times[0], 30, smp0, gshot,
+        gifReferenceFrame(camMode, selectedFrame, smp0));
     }
     S.playing = false;
     updatePlayBtn();
@@ -5199,7 +5265,8 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
           if (markerWorld) cam2.freeFocus = markerWorld;
         }
         if (smp) {
-          if (camMode === "auto") gifAutoCamStep(cam2, exportResult, t, dtF, smp, gshot);
+          if (camMode === "auto")
+            gifAutoCamStep(cam2, exportResult, t, dtF, smp, gshot, frameB);
           else if (camMode === "ship") {
             cam2.focusMode = "ship";
             cam2.dist = Math.max(V.mag(smp.r) * 0.35, BODIES[smp.cen].radius * 3, 2000);

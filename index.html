@@ -19,8 +19,8 @@
 
   <header id="topbar">
     <div id="logo">
-      <div class="logo-line"><span class="mark">◈</span> Mission Trajectory Planner <span class="ver">v1.19.5</span></div>
-      <div class="logo-sub">Patched-conic engine · Rev 1.19.5</div>
+      <div class="logo-line"><span class="mark">◈</span> Mission Trajectory Planner <span class="ver">v1.19.6</span></div>
+      <div class="logo-sub">Patched-conic engine · Rev 1.19.6</div>
     </div>
     <select id="presetSel" title="Load a preset mission"></select>
     <input id="epochInp" title="Mission epoch (UTC, ISO 8601)" spellcheck="false">
@@ -84,6 +84,8 @@
       <canvas id="cv"></canvas>
 
       <div id="hud">
+        <button id="hudToggle" type="button" aria-expanded="true"
+          aria-label="Collapse telemetry" title="Collapse telemetry">&minus;</button>
         <div class="hud-met"><span id="hudMet">T+00:00:00:00</span></div>
         <div class="hud-date" id="hudDate">—</div>
         <div class="hud-grid">

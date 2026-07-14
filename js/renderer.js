@@ -1212,9 +1212,16 @@
 
     /* orbit paths */
     if (opts.orbits !== false) {
+      const orbitFocus = BODIES[camera.focusBody];
+      const localOrbitFocus = orbitFocus && orbitFocus.id !== "sun" &&
+        camera.dist < orbitFocus.radius * 120 ? orbitFocus.id : null;
       for (const id in BODIES) {
         const b = BODIES[id];
         if (!b.parent || !isShown(b)) continue;
+        // At local-body scale, heliocentric and parent-system orbits become a
+        // dense set of near-straight lines through the focused globe. Retain
+        // only the focused body's satellites; mission trajectories remain.
+        if (localOrbitFocus && b.parent !== localOrbitFocus) continue;
         const parentE = eye(bodyPos[b.parent]);
         const dPar = Math.hypot(parentE[0], parentE[1], parentE[2]);
         const appOrbit = (f * 2 * b.aKm) / Math.max(dPar, near);
@@ -1495,15 +1502,15 @@
       const pastStart = activeWindowS ? activeRange.start : 0;
       const futureEnd = activeWindowS ? activeRange.end : rel.length;
       const strideFor = (n) => Math.max(1, Math.ceil(n / 3800));
-      drawTrajPasses = (skipFn) => {
+      drawTrajPasses = (skipFn, frontUnderlay) => {
         const denseSkip = (p, ex, ey, ez, index) =>
           !!cache.denseDocked[index] || !!(skipFn && skipFn(p, ex, ey, ez));
         const bridgeJoined = !!(ss[bridge.lo] && ss[bridge.lo].dockedTo) ||
           !!(ss[bridge.hi] && ss[bridge.hi].dockedTo);
         if (tNow < ss[ss.length - 1].t) {
           const count = futureEnd - futureStart;
-          g.strokeStyle = P().trajFuture;
-          g.lineWidth = 1.1;
+          g.strokeStyle = frontUnderlay ? P().bg : P().trajFuture;
+          g.lineWidth = frontUnderlay ? 3.4 : 1.1;
           g.setLineDash([5, 6]);
           const drawFutureLayer = (alpha, points, includeCached) => {
             if (!(alpha > 0)) return;
@@ -1532,8 +1539,8 @@
             if (!bridgeJoined && bridge.past.length > 1)
               polyline(bridge.past, 1, null, 0, bridge.past.length, relOffset);
           }
-          g.strokeStyle = P().trajPast;
-          g.lineWidth = 1.4;
+          g.strokeStyle = frontUnderlay ? P().bg : P().trajPast;
+          g.lineWidth = frontUnderlay ? 3.8 : 1.4;
           if (pastEnd - pastStart > 1) polyline(rel, st, denseSkip, pastStart, pastEnd, relOffset,
             cache.denseBreakBefore);
           if (!bridgeJoined && bridge.past.length > 1)
@@ -1667,7 +1674,8 @@
         g.fillStyle = gr;
         g.beginPath(); g.arc(prj.x, prj.y, r * 6, 0, 2 * Math.PI); g.fill();
         if (textured) {
-          const sp = TEX.spriteFor(b, r, [0, 0, 1], jd, textureCameraBasis, true);
+          const sp = TEX.spriteFor(b, r, [0, 0, 1], jd, textureCameraBasis, true,
+            !!scene.textureMotion);
           if (sp) g.drawImage(sp, prj.x - r - 1, prj.y - r - 1, 2 * r + 2, 2 * r + 2);
           else { g.fillStyle = "#ffd76e"; g.beginPath(); g.arc(prj.x, prj.y, r, 0, 2 * Math.PI); g.fill(); }
         } else if (P().paperBodies) {
@@ -1691,7 +1699,8 @@
         const Lw = displayFrame.kind === "synodic"
           ? V.norm(V.sub(bodyActual.sun, bodyActual[id]))
           : V.norm(V.sub(bodyPos.sun, bodyPos[id]));
-        const sp = TEX.spriteFor(b, r, Lw, jd, textureCameraBasis, flat);
+        const sp = TEX.spriteFor(b, r, Lw, jd, textureCameraBasis, flat,
+          !!scene.textureMotion);
         if (sp) g.drawImage(sp, prj.x - r - 1, prj.y - r - 1, 2 * r + 2, 2 * r + 2);
       } else if (P().paperBodies) {
         // blueprint technical-drawing style: simplified planetary features in ink
@@ -1847,7 +1856,13 @@
     }
 
     /* trajectory front pass: the parts nearer than the big disks */
-    if (drawTrajPasses && bigDisks.length) drawTrajPasses(frontSkip);
+    if (drawTrajPasses && bigDisks.length) {
+      // A narrow theme-colored separation beneath camera-facing trajectory
+      // segments makes a low orbit read as passing above the textured globe,
+      // while the physical sphere test still removes every far-side segment.
+      g.save(); g.globalAlpha *= 0.72; drawTrajPasses(frontSkip, true); g.restore();
+      drawTrajPasses(frontSkip, false);
+    }
     if (drawFleetPasses && bigDisks.length) drawFleetPasses(frontSkip);
 
     /* Virtual CR3BP equilibrium points. They are deliberately not catalog

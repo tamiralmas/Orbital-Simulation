@@ -188,10 +188,28 @@
     }
   }
 
+  function setHudCollapsed(collapsed, persist) {
+    const hud = $("hud");
+    const toggle = $("hudToggle");
+    if (!hud || !toggle) return;
+    hud.classList.toggle("hud-collapsed", !!collapsed);
+    toggle.textContent = collapsed ? "+" : "\u2212";
+    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    const action = collapsed ? "Expand telemetry" : "Collapse telemetry";
+    toggle.setAttribute("aria-label", action);
+    toggle.title = action;
+    if (persist) {
+      try { localStorage.setItem("mtp-hud-collapsed", collapsed ? "1" : "0"); } catch (e) {}
+    }
+  }
+
   /* ------------------------------- boot -------------------------------- */
   let saved = null;
+  let savedHud = null;
   try { saved = localStorage.getItem("mtp-theme"); } catch (e) {}
+  try { savedHud = localStorage.getItem("mtp-hud-collapsed"); } catch (e) {}
   applyTheme(saved === "cinematic" || saved === "blueprint" ? saved : "blueprint", false);
+  setHudCollapsed(savedHud === "1", false);
 
   const btn = $("btnTheme");
   if (btn) btn.addEventListener("click", () =>
@@ -207,6 +225,7 @@
   const app = $("app");
   const leftTgl = $("leftTgl");
   const rightTgl = $("rightTgl");
+  const hudToggle = $("hudToggle");
   if (leftTgl) leftTgl.addEventListener("click", () => {
     app.classList.toggle("left-collapsed");
     syncTgls();
@@ -221,6 +240,8 @@
       requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
     }
   });
+  if (hudToggle) hudToggle.addEventListener("click", () =>
+    setHudCollapsed(!$("hud").classList.contains("hud-collapsed"), true));
 
   /* collapsible display options (blueprint) */
   const dispTgl = $("dispTgl");
