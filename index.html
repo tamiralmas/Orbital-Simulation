@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mission Trajectory Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/theme.css" />
+<style>
+  html, body { height: 100%; overflow: hidden; margin: 0; background: #f5f4ef; }
+</style>
+</head>
+<body>
+
+<div id="app" data-theme="blueprint">
+
+  <header id="topbar">
+    <div id="logo">
+      <div class="logo-line"><span class="mark">◈</span> Mission Trajectory Planner <span class="ver">v1.19.4</span></div>
+      <div class="logo-sub">Patched-conic engine · Rev 1.19.4</div>
+    </div>
+    <select id="presetSel" title="Load a preset mission"></select>
+    <input id="epochInp" title="Mission epoch (UTC, ISO 8601)" spellcheck="false">
+    <div id="cineMeta">—</div>
+    
+    <div class="spacer"></div><div class="ctrlstack">
+      <div class="viewbtns">
+        <button id="btnAuto" title="Cinematic auto-camera: close-ups on events, wide shots on cruises (A)">Auto</button>
+        <button id="btnViewSolar" title="Whole solar system">Solar</button>
+        <button id="btnViewMission" title="Fit the mission around its central body">Mission</button>
+        <button id="btnViewShip" title="Camera follows the spacecraft">Ship</button>
+        <button id="btnFocus" title="Zoom to the focused body or spacecraft — double-click a body to focus it (F)">Focus</button>
+        <button id="btnPov" title="Onboard camera — ride along with the spacecraft (V)">POV</button>
+        <button id="btnTop" title="Toggle top-down (2D) view">Top</button>
+      </div>
+      <div class="auxbtns">
+        <select id="frameSel" title="Reference frame for the displayed trajectory"></select>
+        <a class="live-link" href="live.html" title="Open the Earth 100 and Deep 100 mission trackers">Live</a>
+        <button id="btnTrack" title="Ground track / satellite view panel (G)">Track</button>
+        <button id="btnTheme" title="Switch between Blueprint and Cinematic UI">Cinematic UI</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner"></div>
+
+  <main id="layout">
+
+    <aside id="left">
+      <div class="panel-title"><span id="planTitle">01 — MISSION PLAN</span><span id="planDv"></span></div>
+      <input id="missionName" spellcheck="false">
+      <div id="missionMeta"></div>
+      <div id="vehicleBar" class="single">
+        <div class="vehicle-bar-head"><span>MISSION VEHICLES</span><span id="vehicleCount">1/8</span></div>
+        <div class="vehicle-bar-controls">
+          <select id="vehicleSel" aria-label="Selected mission vehicle"></select>
+          <input id="vehicleColor" type="color" value="#52d4c5" title="Inactive trajectory color" aria-label="Selected vehicle trajectory color">
+          <button id="btnVehicleAdd" type="button" title="Add a secondary mission vehicle" aria-label="Add a secondary mission vehicle">+</button>
+          <button id="btnVehicleRemove" type="button" title="Remove the selected mission vehicle" aria-label="Remove the selected mission vehicle">-</button>
+        </div>
+      </div>
+      <div id="scPanel">
+        <div id="scHead" title="Spacecraft properties — click to expand">
+          <span>SPACECRAFT · <span id="scName">—</span></span>
+          <span id="scBudget"></span>
+        </div>
+        <div class="fgrid"></div>
+      </div>
+      <div id="segList"></div>
+      <div id="addRow">
+        <select id="addType"></select>
+        <div id="addBtns">
+          <button id="btnAdd" title="Append segment">+ Add</button>
+          <button id="btnSaveMission" title="Save this mission to the browser's library">Save</button>
+        </div>
+      </div>
+      <div id="totals"></div>
+    </aside>
+
+    <section id="viz">
+      <canvas id="cv"></canvas>
+
+      <div id="hud">
+        <div class="hud-met"><span id="hudMet">T+00:00:00:00</span></div>
+        <div class="hud-date" id="hudDate">—</div>
+        <div class="hud-grid">
+          <div class="hud-cell vehicle aux"><label>VEHICLE</label><span id="hudVehicle">--</span></div>
+          <div class="hud-cell"><label>SEGMENT</label><span id="hudSeg">—</span></div>
+          <div class="hud-cell aux"><label>CENTRAL</label><span id="hudCentral">—</span></div>
+          <div class="hud-cell"><label>ALT / R</label><span id="hudAlt">—</span></div>
+          <div class="hud-cell"><label>SPEED</label><span id="hudVel">—</span></div>
+          <div class="hud-cell apsis"><label>APSIS (OSC)</label><span id="hudApsis">—</span></div>
+          <div class="hud-cell aux"><label>TARGET</label><span id="hudTgt">—</span></div>
+          <div class="hud-cell dv"><label>TOTAL Δv</label><span id="hudDv">—</span></div>
+          <div class="hud-cell frame"><label>FRAME</label><span id="hudFrame">—</span></div>
+        </div>
+      </div>
+
+      <div id="dispOpts">
+        <button id="dispTgl" title="Collapse display options">Display</button>
+        <label><input type="checkbox" id="optOrbits"> orbits</label>
+        <label><input type="checkbox" id="optLabels"> labels</label>
+        <label><input type="checkbox" id="optSoi"> SOI</label>
+        <label id="optGridLbl"><input type="checkbox" id="optGrid"> grid</label>
+        <label><input type="checkbox" id="optEvents"> events</label>
+        <label title="Show the live osculating orbit with apoapsis and periapsis markers"><input type="checkbox" id="optApsides"> apsides</label>
+        <label><input type="checkbox" id="optEvLabels"> event labels</label>
+        <label><input type="checkbox" id="optTex"> textures</label>
+        <label title="Render everything fully lit — no night side or shading" ><input type="checkbox" id="optFlat"> full bright</label>
+        <label><input type="checkbox" id="optMinor" title="Dwarf planets &amp; asteroids"> minor bodies</label>
+        <label title="Show the ideal CR3BP equilibrium markers"><input type="checkbox" id="optLagrange"> L1–L5 points</label>
+        <label class="display-system" for="cr3bpSystemSel">
+          <span>CR3BP system</span>
+          <select id="cr3bpSystemSel" title="Primary-secondary system used for the L1–L5 display">
+            <option value="earth-moon">Earth-Moon</option>
+            <option value="sun-earth">Sun-Earth</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="gtPanel" class="hidden">
+        <div id="gtHead">
+          <span id="gtTitle">GROUND TRACK</span>
+          <span id="gtSub">—</span>
+          <button id="gtClose" title="Close ground track (G)">×</button>
+        </div>
+        <div id="gtTools" aria-label="Ground-track analysis controls">
+          <label title="Draw the spacecraft sensor cone intersection on the map"><input type="checkbox" id="gtSwath"> sensor swath</label>
+          <label>FOV <input id="gtFov" type="number" min="1" max="179" step="1" value="50">°</label>
+          <label>off-nadir <input id="gtOffNadir" type="number" min="-89" max="89" step="1" value="0">°</label>
+          <label title="Show DSN and user-defined stations for this body"><input type="checkbox" id="gtStations"> stations</label>
+          <span id="gtSwathWidth">SWATH —</span>
+        </div>
+        <canvas id="gtCv" width="760" height="380"></canvas>
+      </div>
+
+      <div id="titleBlock">
+        <div class="tb-cell"><div class="tb-k">DWG</div><div class="tb-v" id="tbDwg">—</div></div>
+        <div class="tb-cell"><div class="tb-k">FRAME</div><div class="tb-v" id="tbFrame">—</div></div>
+        <div class="tb-cell"><div class="tb-k">EPOCH</div><div class="tb-v" id="tbEpoch">—</div></div>
+      </div>
+
+      <button id="leftTgl" class="edgeTgl" title="Collapse / expand the mission plan panel">«</button>
+      <button id="rightTgl" class="edgeTgl" title="Collapse / expand the side panel">»</button>
+    </section>
+
+    <aside id="right">
+      <div id="tabs">
+        <button class="tabbtn active" data-pane="scriptPane">Script</button>
+        <button class="tabbtn" data-pane="windowsPane">Windows</button>
+        <button class="tabbtn" data-pane="dataPane">Data</button>
+        <button class="tabbtn" data-pane="guidePane">Guide</button>
+        <button class="tabbtn" data-pane="exportPane">Export</button>
+      </div>
+
+      <div id="scriptPane" class="tabpane active">
+        <div class="pane-tools">
+          <span class="hint">GMAT-style sequence (generated)</span>
+          <button id="btnCopyScript">Copy</button>
+        </div>
+        <pre id="scriptPre"></pre>
+      </div>
+
+      <div id="windowsPane" class="tabpane">
+        <div class="window-pane-head">
+          <div>
+            <h3>Launch window search</h3>
+            <p class="hint">Single-revolution Lambert scan. Lower bands are better.</p>
+          </div>
+          <span class="window-badge">PORKCHOP</span>
+        </div>
+
+        <div class="fgrid window-form">
+          <label for="winFrom">Departure body</label>
+          <select id="winFrom"></select>
+          <label for="winTo">Arrival body</label>
+          <select id="winTo"></select>
+          <label for="winStart">Departure start</label>
+          <input id="winStart" type="date">
+          <label for="winEnd">Departure end</label>
+          <input id="winEnd" type="date">
+          <label for="winTofMin">Minimum TOF (days)</label>
+          <input id="winTofMin" type="number" min="0.001" step="any">
+          <label for="winTofMax">Maximum TOF (days)</label>
+          <input id="winTofMax" type="number" min="0.001" step="any">
+          <label for="winGrid">Grid</label>
+          <select id="winGrid">
+            <option value="40x30">40 x 30 preview</option>
+            <option value="80x60" selected>80 x 60 standard</option>
+            <option value="120x80">120 x 80 detailed</option>
+          </select>
+          <label for="winMetric">Color metric</label>
+          <select id="winMetric">
+            <option value="c3">C3</option>
+            <option value="totalCharacteristicVelocity">Total characteristic delta-v</option>
+            <option value="departureVInfinity">Departure v-infinity</option>
+            <option value="arrivalVInfinity">Arrival v-infinity</option>
+          </select>
+        </div>
+
+        <div class="window-actions">
+          <button id="winGenerate" type="button">Generate plot</button>
+          <button id="winCancel" type="button" disabled>Cancel</button>
+        </div>
+        <div id="winProgress" class="window-progress" aria-label="Launch-window search progress">
+          <div id="winProgressBar"></div>
+        </div>
+
+        <div class="window-canvas-wrap">
+          <canvas id="winCanvas" width="640" height="440" tabindex="0"
+            aria-label="Launch-window porkchop plot; hover for values and click to select a solution"></canvas>
+          <div id="winTooltip" class="window-tooltip" hidden></div>
+        </div>
+        <div class="window-axis-note">Departure date → &nbsp; / &nbsp; time of flight ↑</div>
+        <p class="window-footnote">Total characteristic delta-v is departure plus arrival
+          v-infinity; it is not a finite parking-orbit or capture-burn budget.</p>
+
+        <div id="winSelection" class="window-selection" hidden>
+          <div class="window-selection-kicker">Selected solution</div>
+          <div id="winSelectionReadout" class="window-readout"></div>
+          <div class="fgrid window-apply-grid">
+            <label for="winApplySegment">Apply to segment</label>
+            <select id="winApplySegment"></select>
+          </div>
+          <button id="winApply" type="button" class="wide" disabled>Apply departure epoch + TOF</button>
+          <details id="winTargeting" class="window-targeting">
+            <summary>Transfer / Depart Vary / Achieve</summary>
+            <p class="hint">Jointly vary departure date and flight time inside the search bounds while holding one simplified B-plane aim offset derived from the seed trajectory.</p>
+            <div class="fgrid">
+              <label for="winTargetGoal">Arrival periapsis altitude (km)</label>
+              <input id="winTargetGoal" type="number" min="0" step="any" value="300">
+              <label for="winTargetSeed">Aim seed periapsis (km)</label>
+              <input id="winTargetSeed" type="number" min="0" step="any" value="1000">
+              <label for="winTargetTolerance">Tolerance (km)</label>
+              <input id="winTargetTolerance" type="number" min="0.001" step="any" value="1">
+            </div>
+            <button id="winTargetSolve" type="button" class="wide">Solve bounded date + TOF</button>
+            <div id="winTargetStatus" class="window-target-status" role="status" aria-live="polite">Uses the departure and TOF ranges above as hard bounds.</div>
+          </details>
+        </div>
+        <div id="winStatus" class="window-status" role="status" aria-live="polite">
+          Set a body pair and search range, then generate the plot.
+        </div>
+      </div>
+
+      <div id="dataPane" class="tabpane">
+        <div class="analysis-head">
+          <div>
+            <h3>Mission analysis</h3>
+            <p class="hint">Bounded reports for the local body leg at the displayed time.</p>
+          </div>
+          <span class="analysis-badge">DATA</span>
+        </div>
+        <div id="analysisStatus" class="analysis-status" role="status" aria-live="polite">
+          Open Data or press Refresh to analyze the current leg.
+        </div>
+
+        <section class="analysis-section" aria-labelledby="analysisStateHead">
+          <div class="analysis-section-head">
+            <h4 id="analysisStateHead">Osculating state</h4>
+            <button id="analysisRefresh" type="button">Refresh</button>
+          </div>
+          <div id="analysisElements" class="element-grid"><span class="hint">No local two-body state selected.</span></div>
+          <div class="analysis-chart-controls">
+            <label for="analysisMetric">Series</label>
+            <select id="analysisMetric">
+              <option value="altitudeKm">Altitude</option>
+              <option value="speedKmS">Speed</option>
+              <option value="targetDistanceKm">Distance to target</option>
+              <option value="aKm">Semi-major axis</option>
+              <option value="e">Eccentricity</option>
+              <option value="iDeg">Inclination</option>
+              <option value="raanDeg">RAAN</option>
+              <option value="argPeriapsisDeg">Argument of periapsis</option>
+              <option value="trueAnomalyDeg">True anomaly</option>
+            </select>
+            <button id="analysisCsv" type="button" disabled>CSV</button>
+          </div>
+          <div class="analysis-canvas-wrap">
+            <canvas id="analysisCanvas" width="640" height="300" tabindex="0" aria-label="Mission analysis time-series chart"></canvas>
+            <div id="analysisTooltip" class="analysis-tooltip" hidden></div>
+          </div>
+        </section>
+
+        <section class="analysis-section" aria-labelledby="eclipseHead">
+          <div class="analysis-section-head">
+            <h4 id="eclipseHead">Eclipse / lighting</h4>
+            <button id="eclipseCompute" type="button">Compute</button>
+          </div>
+          <div id="eclipseSummary" class="analysis-readout hint">Conical Sun / local-body shadow; compute on demand.</div>
+          <label class="analysis-check"><input type="checkbox" id="eclipse3d"> show conical umbra / penumbra in the 3D view</label>
+          <div id="eclipseIntervals" class="analysis-table-wrap"></div>
+        </section>
+
+        <section id="uncertaintySection" class="analysis-section uncertainty-section" aria-labelledby="uncertaintyHead">
+          <div class="analysis-section-head">
+            <div>
+              <h4 id="uncertaintyHead">Uncertainty / dispersion</h4>
+              <span class="uncertainty-kicker">Seeded, bounded Monte Carlo</span>
+            </div>
+            <button id="uncRun" type="button">Run</button>
+          </div>
+          <p class="hint">Propagates a named local source state to one endpoint with a diagonal Cartesian covariance and an optional RTN maneuver. Results are repeatable for the same seed.</p>
+
+          <fieldset class="uncertainty-fieldset">
+            <legend>State 1-sigma (diagonal covariance)</legend>
+            <div class="uncertainty-vector-grid" aria-label="Cartesian state uncertainty">
+              <label>X <span>km</span><input id="uncPosX" type="number" min="0" max="1000000" step="any" value="0.1"></label>
+              <label>Y <span>km</span><input id="uncPosY" type="number" min="0" max="1000000" step="any" value="0.1"></label>
+              <label>Z <span>km</span><input id="uncPosZ" type="number" min="0" max="1000000" step="any" value="0.1"></label>
+              <label>Vx <span>km/s</span><input id="uncVelX" type="number" min="0" max="100" step="any" value="0.0001"></label>
+              <label>Vy <span>km/s</span><input id="uncVelY" type="number" min="0" max="100" step="any" value="0.0001"></label>
+              <label>Vz <span>km/s</span><input id="uncVelZ" type="number" min="0" max="100" step="any" value="0.0001"></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="uncertainty-fieldset">
+            <legend>RTN maneuver and execution error</legend>
+            <div class="uncertainty-vector-grid uncertainty-dv-grid" aria-label="RTN maneuver components">
+              <label>Radial <span>km/s</span><input id="uncDvR" type="number" min="-100" max="100" step="any" value="0"></label>
+              <label>Along-track <span>km/s</span><input id="uncDvT" type="number" min="-100" max="100" step="any" value="0"></label>
+              <label>Normal <span>km/s</span><input id="uncDvN" type="number" min="-100" max="100" step="any" value="0"></label>
+            </div>
+            <div class="uncertainty-control-grid">
+              <label>Magnitude 1-sigma <input id="uncMagPct" type="number" min="0" max="100" step="any" value="0.5"><span>%</span></label>
+              <label>Pointing 1-sigma <input id="uncPointDeg" type="number" min="0" max="90" step="any" value="0.15"><span>deg</span></label>
+              <label>Timing 1-sigma <input id="uncTimingS" type="number" min="0" max="86400" step="any" value="0.5"><span>s</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="uncertainty-fieldset">
+            <legend>Monte Carlo</legend>
+            <div class="uncertainty-control-grid uncertainty-run-grid">
+              <label>Samples <input id="uncSamples" type="number" min="100" max="5000" step="100" value="1000"></label>
+              <label>Seed <input id="uncSeed" type="text" maxlength="48" value="1170"></label>
+              <label>Horizon <input id="uncHours" type="number" min="0" max="8760" step="any" value="6"><span>h</span></label>
+            </div>
+          </fieldset>
+
+          <div id="uncStatus" class="analysis-readout uncertainty-status" role="status" aria-live="polite">Ready. Results use a bounded two-body local propagation model.</div>
+          <div id="uncResults" class="uncertainty-results" aria-live="polite">
+            <div class="uncertainty-result"><label>Endpoint position (est. 95%)</label><strong>--</strong></div>
+            <div class="uncertainty-result"><label>Endpoint velocity (est. 95%)</label><strong>--</strong></div>
+            <div class="uncertainty-result"><label>Endpoint XY ellipse (95%)</label><strong>--</strong></div>
+            <div class="uncertainty-result"><label>Source / endpoint</label><strong>--</strong></div>
+            <div class="uncertainty-result"><label>Run</label><strong>--</strong></div>
+          </div>
+          <div class="uncertainty-canvas-wrap">
+            <canvas id="uncCanvas" width="640" height="260" aria-label="Monte Carlo local XY position dispersion"></canvas>
+            <span class="uncertainty-axis uncertainty-axis-x">+X</span>
+            <span class="uncertainty-axis uncertainty-axis-y">+Y</span>
+          </div>
+          <p class="hint uncertainty-footnote">The chart is centered on the finite sampled endpoint mean in the source body's Cartesian X/Y plane. The estimated containment is endpoint-only design context, not an operational bound or navigation flight software.</p>
+        </section>
+
+        <section class="analysis-section" aria-labelledby="accessHead">
+          <div class="analysis-section-head">
+            <h4 id="accessHead">Station access</h4>
+            <button id="accessCompute" type="button">Compute</button>
+          </div>
+          <div class="analysis-inline-form">
+            <label for="accessMask">Elevation mask</label>
+            <input id="accessMask" type="number" min="0" max="89" step="1" value="10">
+            <span>deg</span>
+            <button id="accessCsv" type="button" disabled>CSV</button>
+          </div>
+          <p class="hint">DSN sites are included on Earth. User sites can be added for any rotating body.</p>
+          <details id="stationEditor" class="station-editor">
+            <summary>Station catalog</summary>
+            <div class="fgrid station-form">
+              <label for="stationName">Name</label>
+              <input id="stationName" type="text" maxlength="48" placeholder="Lunar south station">
+              <label for="stationBody">Body</label>
+              <select id="stationBody"></select>
+              <label for="stationLat">Latitude (deg)</label>
+              <input id="stationLat" type="number" min="-90" max="90" step="any" value="0">
+              <label for="stationLon">Longitude (deg)</label>
+              <input id="stationLon" type="number" min="-180" max="180" step="any" value="0">
+              <label for="stationAlt">Altitude (km)</label>
+              <input id="stationAlt" type="number" min="-10" step="any" value="0">
+              <label for="stationMask">Elevation mask (deg)</label>
+              <input id="stationMask" type="number" min="0" max="89" step="any" value="10">
+            </div>
+            <button id="stationAdd" type="button" class="wide">Add station</button>
+            <div id="stationEditorStatus" class="analysis-readout hint">Up to 32 user stations are stored in this browser.</div>
+            <div id="stationList" class="station-list"></div>
+          </details>
+          <div id="accessReport" class="analysis-table-wrap"><span class="hint">No access report computed.</span></div>
+        </section>
+
+        <section class="analysis-section" aria-labelledby="j2Head">
+          <div class="analysis-section-head"><h4 id="j2Head">Earth J2</h4></div>
+          <label class="analysis-check"><input type="checkbox" id="analysisJ2"> preview first-order secular rates on a Kepler chart</label>
+          <div class="analysis-fleet-controls">
+            <select id="j2Coast" aria-label="Earth coast segment"></select>
+            <button id="j2Apply" type="button">Use J2</button>
+            <button id="j2Kepler" type="button">Use Kepler</button>
+          </div>
+          <div id="j2Readout" class="analysis-readout hint">Available for bound Earth-centered osculating orbits. Applying J2 to a Coast is explicit and changes only the current in-memory mission.</div>
+        </section>
+
+        <section class="analysis-section" aria-labelledby="formationHead">
+          <div class="analysis-section-head"><h4 id="formationHead">Mission vehicles</h4></div>
+          <p class="hint">Native branches share one UTC timeline. Range and rate are live; opening Data also computes closest approach and threshold intervals against the selected vehicle.</p>
+          <div id="formationReadout" class="analysis-readout hint">Primary vehicle only.</div>
+        </section>
+
+        <section class="analysis-section" aria-labelledby="fleetHead">
+          <div class="analysis-section-head"><h4 id="fleetHead">Comparison missions</h4></div>
+          <p class="hint">Add up to seven comparison craft. All are propagated on one absolute timeline, rendered together, and checked against the primary craft.</p>
+          <div class="analysis-fleet-controls">
+            <select id="fleetMission" aria-label="Comparison mission"></select>
+            <button id="fleetAdd" type="button">Add craft</button>
+            <button id="fleetRemove" type="button" disabled>Remove selected</button>
+          </div>
+          <label class="analysis-check"><input type="checkbox" id="fleetAlignEpoch" checked> align comparison T+0 to the current mission epoch</label>
+          <div class="analysis-inline-form">
+            <label for="fleetThreshold">Conjunction threshold</label>
+            <input id="fleetThreshold" type="number" min="0.001" step="any" value="100">
+            <span>km</span><span></span>
+          </div>
+          <div id="fleetList" class="fleet-list"><span class="hint">Primary craft only.</span></div>
+          <div id="fleetReport" class="analysis-readout hint">No comparison craft added.</div>
+          <canvas id="fleetCanvas" width="640" height="220" aria-label="Relative range chart"></canvas>
+          <button id="fleetCsv" type="button" class="wide" disabled>Export relative range CSV</button>
+        </section>
+      </div>
+
+      <div id="guidePane" class="tabpane"></div>
+
+      <div id="exportPane" class="tabpane">
+        <h3>Snapshot</h3>
+        <p class="hint">Saves the current 3D view as an image.</p>
+        <button id="btnPng" class="wide">Export PNG snapshot</button>
+
+        <h3>Animated GIF</h3>
+        <p class="hint">Renders the whole mission (launch → end) into a looping GIF,
+        streamed to the encoder in-browser (GIF89a, LZW). Pick a camera and a time
+        mapping — "auto-paced" replays the mission exactly like AUTO playback,
+        slowing for every event (length is set by the pacing, up to 1200 frames).</p>
+        <div class="fgrid">
+          <label>Camera</label>
+          <select id="gifCam">
+            <option value="current">Current view (static)</option>
+            <option value="auto" selected="">Auto camera</option>
+            <option value="ship">Follow ship</option>
+            <option value="pov">POV (onboard)</option>
+          </select>
+          <label>Time</label>
+          <select id="gifTime">
+            <option value="paced" selected="">Auto-paced (full mission)</option>
+            <option value="linear">Linear (duration below)</option>
+          </select>
+          <label>Width (px)</label>
+          <select id="gifW">
+            <option value="480" selected="">480</option>
+            <option value="640">640</option>
+            <option value="800">800</option>
+          </select>
+          <label>Frame rate</label>
+          <select id="gifFps">
+            <option value="10" selected="">10 fps</option>
+            <option value="12">12 fps</option>
+            <option value="15">15 fps</option>
+          </select>
+          <label>Duration (s)</label>
+          <select id="gifDur">
+            <option value="5">5</option>
+            <option value="8" selected="">8</option>
+            <option value="12">12</option>
+            <option value="20">20</option>
+            <option value="30">30</option>
+            <option value="45">45</option>
+          </select>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin:8px 0 4px; cursor:pointer;">
+          <input type="checkbox" id="gifTrack"> include ground-track overlay
+        </label>
+        <button id="btnGif" class="wide">Export mission GIF</button>
+
+        <h3>Mission plan (JSON)</h3>
+        <button id="btnJsonExport" class="wide">Export mission JSON</button>
+        <label class="filebtn wide">Import mission JSON
+          <input type="file" id="jsonImportFile" accept=".json,application/json">
+        </label>
+
+        <h3>Saved missions (this browser)</h3>
+        <p class="hint">Missions stored with the Save button live in this browser's
+        local storage and appear under "My missions" in the mission selector.</p>
+        <div class="fgrid">
+          <label>Mission</label>
+          <select id="savedSel"></select>
+        </div>
+        <button id="btnDeleteSaved" class="wide">Delete selected</button>
+
+        <h3>Body catalog</h3>
+        <p class="hint">Extend the solar system with your own bodies (asteroids, comets,
+        extra moons) — format documented in the Guide tab.</p>
+        <label class="filebtn wide">Import body catalog JSON
+          <input type="file" id="catImportFile" accept=".json,application/json">
+        </label>
+      </div>
+    </aside>
+  </main>
+
+  <footer id="transport">
+    <div id="eventStrip"></div>
+    <button id="btnReset" title="Back to T+0">⏮︎</button>
+    <button id="btnPlay" title="Play / pause (Space)">▶︎</button>
+    <select id="speedSel" title="Simulation speed"></select>
+    <div id="scrubwrap">
+      <div id="eclipseBands" aria-hidden="true"></div>
+      <div id="ticks"></div>
+      <input type="range" id="scrub" min="0" max="1" step="any" value="0">
+    </div>
+    <span id="dwellHint">EVENT DWELL ON</span>
+    <span id="transportInfo">—</span>
+    <div id="paneBtns">
+      <button data-pane="scriptPane">Script</button>
+      <button data-pane="windowsPane">Windows</button>
+      <button data-pane="dataPane">Data</button>
+      <button data-pane="guidePane">Guide</button>
+      <button data-pane="exportPane">Export</button>
+    </div>
+  </footer>
+
+  <div id="gifModal">
+    <div class="modal-box">
+      <div class="modal-title">Exporting GIF</div>
+      <div class="progress"><div id="gifBar"></div></div>
+      <div id="gifLbl" class="hint">Preparing…</div>
+      <button id="gifCancel">Cancel</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/constants.js"></script>
+<script src="js/kepler.js"></script>
+<script src="js/targeting.js"></script>
+<script src="js/ode.js"></script>
+<script src="js/cr3bp.js"></script>
+<script src="js/libration.js"></script>
+<script src="js/windows.js"></script>
+<script src="js/analysis.js"></script>
+<script src="js/environment-models.js"></script>
+<script src="js/ephemeris-table.js"></script>
+<script src="js/planner-ephemeris-data.js"></script>
+<script src="js/planner-ephemeris.js"></script>
+<script src="js/force-models.js"></script>
+<script src="js/sgp4.js"></script>
+<script src="js/uncertainty.js"></script>
+<script src="js/multicraft.js"></script>
+<script src="js/propagator.js"></script>
+<script src="js/missions.js"></script>
+<script src="js/gifenc.js"></script>
+<script src="js/scriptgen.js"></script>
+<!-- optional: generated by get_textures.ps1 (NASA-imagery planet maps).
+     A 404 here is harmless — the renderer falls back to gradient bodies. -->
+<script src="js/textures-data.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/groundtrack.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/offline.js"></script>
+</body>
+</html>

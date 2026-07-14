@@ -1,0 +1,1614 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mission-trajectory-planner.invalid/schema/mission.schema.json",
+  "title": "Mission Trajectory Planner mission",
+  "description": "Portable mission definition consumed by the buildless Mission Trajectory Planner.",
+  "x-mtp-version": "1.19.1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "name",
+    "epoch",
+    "segments"
+  ],
+  "properties": {
+    "format": {
+      "type": "string",
+      "enum": [
+        "mtp-mission-1",
+        "mtp-mission-2"
+      ],
+      "default": "mtp-mission-2",
+      "title": "Portable mission format",
+      "description": "Version 2 adds native secondary vehicles; version 1 remains accepted for backward-compatible single-vehicle files."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "title": "Mission name"
+    },
+    "description": {
+      "type": "string",
+      "title": "Mission description"
+    },
+    "epoch": {
+      "type": "string",
+      "format": "date-time",
+      "title": "UTC mission epoch"
+    },
+    "spacecraft": {
+      "type": "object",
+      "additionalProperties": true,
+      "title": "Spacecraft properties",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "dryKg": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "propKg": {
+          "type": [
+            "number",
+            "string"
+          ],
+          "minimum": 0
+        },
+        "isp": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "thrustN": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fovDeg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 179
+        }
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Optional nominal covariance and bounded Monte Carlo settings."
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Optional Track/Data defaults for stations, sensors, eclipses, and fleet comparisons."
+    },
+    "targetingValidation": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Optional reproducible Vary/Achieve validation metadata."
+    },
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/launch"
+          },
+          {
+            "$ref": "#/$defs/coast"
+          },
+          {
+            "$ref": "#/$defs/finite_burn"
+          },
+          {
+            "$ref": "#/$defs/gp_orbit"
+          },
+          {
+            "$ref": "#/$defs/libration"
+          },
+          {
+            "$ref": "#/$defs/cr3bp_coast"
+          },
+          {
+            "$ref": "#/$defs/stationkeep"
+          },
+          {
+            "$ref": "#/$defs/coast_to"
+          },
+          {
+            "$ref": "#/$defs/impulse"
+          },
+          {
+            "$ref": "#/$defs/separate"
+          },
+          {
+            "$ref": "#/$defs/rendezvous"
+          },
+          {
+            "$ref": "#/$defs/dock"
+          },
+          {
+            "$ref": "#/$defs/undock"
+          },
+          {
+            "$ref": "#/$defs/hohmann"
+          },
+          {
+            "$ref": "#/$defs/transfer"
+          },
+          {
+            "$ref": "#/$defs/depart"
+          },
+          {
+            "$ref": "#/$defs/insertion"
+          },
+          {
+            "$ref": "#/$defs/flyby"
+          },
+          {
+            "$ref": "#/$defs/observe"
+          },
+          {
+            "$ref": "#/$defs/return"
+          },
+          {
+            "$ref": "#/$defs/land"
+          },
+          {
+            "$ref": "#/$defs/ascend"
+          },
+          {
+            "$ref": "#/$defs/reentry"
+          }
+        ]
+      }
+    },
+    "vehicles": {
+      "type": "array",
+      "maxItems": 7,
+      "title": "Secondary mission vehicles",
+      "description": "Optional dependency-ordered vehicle branches. The root spacecraft and segments remain the reserved primary vehicle. Vehicle-id uniqueness and cross-reference resolution are mission-level constraints that loaders must validate.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "name",
+          "segments"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "not": {
+              "const": "primary"
+            },
+            "title": "Mission-local vehicle id",
+            "description": "Unique mission-local id. The literal 'primary' is reserved for the root spacecraft."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Vehicle display name"
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[0-9A-Fa-f]{6}$",
+            "title": "Trajectory color"
+          },
+          "spacecraft": {
+            "type": "object",
+            "additionalProperties": true,
+            "title": "Spacecraft properties",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "dryKg": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "propKg": {
+                "type": [
+                  "number",
+                  "string"
+                ],
+                "minimum": 0
+              },
+              "isp": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "thrustN": {
+                "type": "number",
+                "minimum": 0
+              },
+              "fovDeg": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 179
+              }
+            }
+          },
+          "segments": {
+            "type": "array",
+            "minItems": 1,
+            "title": "Vehicle branch segments",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/launch"
+                },
+                {
+                  "$ref": "#/$defs/coast"
+                },
+                {
+                  "$ref": "#/$defs/finite_burn"
+                },
+                {
+                  "$ref": "#/$defs/gp_orbit"
+                },
+                {
+                  "$ref": "#/$defs/libration"
+                },
+                {
+                  "$ref": "#/$defs/cr3bp_coast"
+                },
+                {
+                  "$ref": "#/$defs/stationkeep"
+                },
+                {
+                  "$ref": "#/$defs/coast_to"
+                },
+                {
+                  "$ref": "#/$defs/impulse"
+                },
+                {
+                  "$ref": "#/$defs/separate"
+                },
+                {
+                  "$ref": "#/$defs/rendezvous"
+                },
+                {
+                  "$ref": "#/$defs/dock"
+                },
+                {
+                  "$ref": "#/$defs/undock"
+                },
+                {
+                  "$ref": "#/$defs/hohmann"
+                },
+                {
+                  "$ref": "#/$defs/transfer"
+                },
+                {
+                  "$ref": "#/$defs/depart"
+                },
+                {
+                  "$ref": "#/$defs/insertion"
+                },
+                {
+                  "$ref": "#/$defs/flyby"
+                },
+                {
+                  "$ref": "#/$defs/observe"
+                },
+                {
+                  "$ref": "#/$defs/return"
+                },
+                {
+                  "$ref": "#/$defs/land"
+                },
+                {
+                  "$ref": "#/$defs/ascend"
+                },
+                {
+                  "$ref": "#/$defs/reentry"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "launch": {
+      "title": "Launch → MECO / parking orbit",
+      "description": "With a named site, starts at the exact selected pad at T+0, then uses a one-second schematic visual bridge to MECO (ascent aerodynamics are not simulated; ascent Δv is bookkept with loss + Earth-rotation estimates). Ordinary launches use a site-compatible direct-ascent plane; Target Plane launches preserve that transfer plane and show the required powered-ascent dogleg. 'MECO ellipse' delivers a suborbital-periapsis transfer ellipse whose apoapsis is the target altitude — add an Insertion (at apoapsis) to circularize, like a real OMS-2 burn. 'direct' inserts straight into the circular orbit (legacy). A blank site with Direct insertion is an orbital-state initialization and does not invent a surface ascent. A launch site constrains inclination to ≥ its latitude.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "launch",
+          "title": "Segment type"
+        },
+        "body": {
+          "type": "string",
+          "title": "Body",
+          "default": "earth",
+          "enum": [
+            "sun",
+            "mercury",
+            "venus",
+            "earth",
+            "moon",
+            "mars",
+            "phobos",
+            "deimos",
+            "jupiter",
+            "io",
+            "europa",
+            "ganymede",
+            "callisto",
+            "saturn",
+            "enceladus",
+            "titan",
+            "uranus",
+            "neptune",
+            "triton",
+            "pluto",
+            "charon",
+            "ceres",
+            "eris",
+            "haumea",
+            "makemake",
+            "vesta",
+            "pallas",
+            "hygiea",
+            "psyche",
+            "eros",
+            "bennu",
+            "ryugu",
+            "apophis",
+            "didymos"
+          ]
+        },
+        "site": {
+          "type": "string",
+          "title": "Launch site (Earth)",
+          "default": "ksc",
+          "enum": [
+            "",
+            "ksc",
+            "starbase",
+            "vandenberg",
+            "wallops",
+            "baikonur",
+            "kourou",
+            "tanegashima",
+            "satish",
+            "jiuquan"
+          ]
+        },
+        "ascent": {
+          "type": "string",
+          "title": "Ascent mode",
+          "default": "meco",
+          "enum": [
+            "meco",
+            "direct"
+          ]
+        },
+        "altKm": {
+          "type": "number",
+          "title": "Target altitude (km)",
+          "default": 200,
+          "minimum": 1
+        },
+        "incDeg": {
+          "type": "number",
+          "title": "Inclination (°)",
+          "default": 28.5
+        },
+        "raanDeg": {
+          "type": "number",
+          "title": "RAAN Ω (°)",
+          "default": 0
+        },
+        "targetPlane": {
+          "type": "string",
+          "title": "Launch window: align plane with",
+          "default": "",
+          "enum": [
+            "",
+            "sun",
+            "mercury",
+            "venus",
+            "earth",
+            "moon",
+            "mars",
+            "phobos",
+            "deimos",
+            "jupiter",
+            "io",
+            "europa",
+            "ganymede",
+            "callisto",
+            "saturn",
+            "enceladus",
+            "titan",
+            "uranus",
+            "neptune",
+            "triton",
+            "pluto",
+            "charon",
+            "ceres",
+            "eris",
+            "haumea",
+            "makemake",
+            "vesta",
+            "pallas",
+            "hygiea",
+            "psyche",
+            "eros",
+            "bennu",
+            "ryugu",
+            "apophis",
+            "didymos"
+          ]
+        },
+        "planeTofDays": {
+          "type": "number",
+          "title": "…as positioned at T+ (days)",
+          "default": 3,
+          "minimum": 0
+        }
+      }
+    },
+    "coast": {
+      "title": "Coast (propagate)",
+      "description": "Propagates for a fixed duration. 'Kepler' uses the analytic universal-variable solution; 'RK4' integrates two-body motion; 'J2 secular' applies Earth's first-order nodal/periapsis drift; 'adaptive n-body' integrates moving point-mass gravity with error control, and 'adaptive environment' adds selectable drag, solar-radiation pressure with eclipses, and Earth J2-J4. The offline Horizons table is bounded and never extrapolated. SOI crossings are detected by the patched-conic Kepler/RK4 modes.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "coast",
+          "title": "Segment type"
+        },
+        "days": {
+          "type": "number",
+          "title": "Duration (days)",
+          "default": 1,
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string",
+          "title": "Propagator",
+          "default": "kepler",
+          "enum": [
+            "kepler",
+            "rk4",
+            "j2-secular",
+            "adaptive-nbody",
+            "adaptive-environment"
+          ]
+        },
+        "ephemeris": {
+          "type": "string",
+          "title": "Adaptive ephemeris",
+          "default": "catalog",
+          "enum": [
+            "catalog",
+            "planner-horizons"
+          ],
+          "description": "Optional. Adaptive ephemeris"
+        },
+        "drag": {
+          "type": "string",
+          "title": "Atmospheric drag",
+          "default": "off",
+          "enum": [
+            "off",
+            "on"
+          ],
+          "description": "Optional. Atmospheric drag"
+        },
+        "srp": {
+          "type": "string",
+          "title": "Solar radiation pressure",
+          "default": "off",
+          "enum": [
+            "off",
+            "on"
+          ],
+          "description": "Optional. Solar radiation pressure"
+        },
+        "harmonics": {
+          "type": "string",
+          "title": "Earth zonal harmonics",
+          "default": "off",
+          "enum": [
+            "off",
+            "j2",
+            "j3",
+            "j4"
+          ],
+          "description": "Optional. Earth zonal harmonics"
+        },
+        "massKg": {
+          "type": "number",
+          "title": "Environment mass (kg)",
+          "default": "",
+          "minimum": 0.001,
+          "description": "Optional. Environment mass (kg)"
+        },
+        "areaM2": {
+          "type": "number",
+          "title": "Reference area (m²)",
+          "default": 10,
+          "minimum": 0.001,
+          "description": "Optional. Reference area (m²)"
+        },
+        "cd": {
+          "type": "number",
+          "title": "Drag coefficient Cd",
+          "default": 2.2,
+          "minimum": 0,
+          "description": "Optional. Drag coefficient Cd"
+        },
+        "cr": {
+          "type": "number",
+          "title": "Reflectivity coefficient Cr",
+          "default": 1.3,
+          "minimum": 0,
+          "description": "Optional. Reflectivity coefficient Cr"
+        },
+        "densityScale": {
+          "type": "number",
+          "title": "Atmosphere density scale",
+          "default": 1,
+          "minimum": 0,
+          "description": "Optional. Atmosphere density scale"
+        }
+      }
+    },
+    "finite_burn": {
+      "title": "Finite-thrust maneuver",
+      "description": "Integrates gravity, thrust, and mass depletion together with adaptive error control. Unlike an impulse preview, this is real propagation: a prograde burn raises apoapsis continuously while the spacecraft moves along the burn arc.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "finite_burn",
+          "title": "Segment type"
+        },
+        "durationMin": {
+          "type": "number",
+          "title": "Burn duration (min)",
+          "default": 10,
+          "minimum": 0.001
+        },
+        "thrustN": {
+          "type": "number",
+          "title": "Thrust (N)",
+          "default": 2000,
+          "minimum": 0
+        },
+        "ispS": {
+          "type": "number",
+          "title": "Specific impulse (s)",
+          "default": 320,
+          "minimum": 1
+        },
+        "direction": {
+          "type": "string",
+          "title": "Thrust direction",
+          "default": "prograde",
+          "enum": [
+            "prograde",
+            "retrograde",
+            "inertial"
+          ]
+        },
+        "dirX": {
+          "type": "number",
+          "title": "Inertial x (if selected)",
+          "default": 1
+        },
+        "dirY": {
+          "type": "number",
+          "title": "Inertial y (if selected)",
+          "default": 0
+        },
+        "dirZ": {
+          "type": "number",
+          "title": "Inertial z (if selected)",
+          "default": 0
+        },
+        "massKg": {
+          "type": "number",
+          "title": "Start mass override (kg, blank = spacecraft)",
+          "default": "",
+          "description": "Optional. Start mass override (kg, blank = spacecraft)"
+        },
+        "gravity": {
+          "type": "string",
+          "title": "Gravity model",
+          "default": "nbody",
+          "enum": [
+            "nbody",
+            "central-relative"
+          ]
+        }
+      }
+    },
+    "gp_orbit": {
+      "title": "GP orbit (SGP4 / SDP4)",
+      "description": "Initializes and propagates a NORAD two-line element set with the Vallado SGP4/SDP4 model. The element epoch and TEME frame are reported explicitly. This is a bounded orbit prediction from mean elements, not telemetry or an operational orbit determination.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type",
+        "line1",
+        "line2"
+      ],
+      "properties": {
+        "type": {
+          "const": "gp_orbit",
+          "title": "Segment type"
+        },
+        "line1": {
+          "type": "string",
+          "title": "TLE line 1",
+          "default": ""
+        },
+        "line2": {
+          "type": "string",
+          "title": "TLE line 2",
+          "default": ""
+        },
+        "days": {
+          "type": "number",
+          "title": "Duration (days)",
+          "default": 2,
+          "minimum": 0.001
+        },
+        "stepMin": {
+          "type": "number",
+          "title": "Output cadence (minutes)",
+          "default": 10,
+          "minimum": 0.1
+        },
+        "strictChecksum": {
+          "type": "string",
+          "title": "TLE checksum",
+          "default": "strict",
+          "enum": [
+            "strict",
+            "relaxed"
+          ]
+        }
+      }
+    },
+    "libration": {
+      "title": "Lagrange-region orbit (CR3BP)",
+      "description": "Initializes an ideal circular restricted three-body problem state about Sun-Earth or Earth-Moon L1/L2. Halo and planar Lyapunov families are differentially corrected with a state-transition matrix. Lissajous is explicitly a bounded linear seed, not a periodic-orbit claim. This segment begins a standalone CR3BP plan.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "libration",
+          "title": "Segment type"
+        },
+        "system": {
+          "type": "string",
+          "title": "Primary-secondary system",
+          "default": "earth-moon",
+          "enum": [
+            "earth-moon",
+            "sun-earth"
+          ]
+        },
+        "point": {
+          "type": "string",
+          "title": "Libration point",
+          "default": "L2",
+          "enum": [
+            "L1",
+            "L2"
+          ]
+        },
+        "family": {
+          "type": "string",
+          "title": "Orbit family",
+          "default": "halo",
+          "enum": [
+            "halo",
+            "planar-lyapunov",
+            "lissajous"
+          ]
+        },
+        "size": {
+          "type": "string",
+          "title": "Validated family size",
+          "default": "small",
+          "enum": [
+            "small",
+            "medium"
+          ]
+        },
+        "hemisphere": {
+          "type": "string",
+          "title": "Halo hemisphere",
+          "default": "north",
+          "enum": [
+            "north",
+            "south"
+          ]
+        }
+      }
+    },
+    "cr3bp_coast": {
+      "title": "CR3BP adaptive coast",
+      "description": "Propagates the full rotating-frame CR3BP equations with adaptive Dormand-Prince 5(4) error control. Duration is measured in the selected reference orbit's characteristic cycles.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "cr3bp_coast",
+          "title": "Segment type"
+        },
+        "cycles": {
+          "type": "number",
+          "title": "Duration (reference cycles)",
+          "default": 2,
+          "minimum": 0.01
+        },
+        "tolerance": {
+          "type": "string",
+          "title": "Error tolerance",
+          "default": "high",
+          "enum": [
+            "standard",
+            "high"
+          ]
+        }
+      }
+    },
+    "stationkeep": {
+      "title": "Libration-orbit stationkeeping",
+      "description": "Runs deterministic ideal impulsive reference tracking in the current CR3BP system. It is a design estimate, not flight guidance: navigation error, maneuver execution error, covariance, and operational constraints are not modeled.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "stationkeep",
+          "title": "Segment type"
+        },
+        "cycles": {
+          "type": "number",
+          "title": "Duration (reference cycles)",
+          "default": 2,
+          "minimum": 0.01,
+          "maximum": 50
+        },
+        "corrections": {
+          "type": "number",
+          "title": "Checks per cycle",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 100
+        },
+        "offsetKm": {
+          "type": "number",
+          "title": "Initial radial offset (km)",
+          "default": 5,
+          "minimum": 0
+        },
+        "maxBurnMs": {
+          "type": "number",
+          "title": "Max correction (m/s)",
+          "default": 5,
+          "minimum": 0.001
+        }
+      }
+    },
+    "coast_to": {
+      "title": "Coast to event",
+      "description": "Propagates until periapsis or apoapsis of the current orbit (detected by the sign change of r·v), up to a time limit.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "coast_to",
+          "title": "Segment type"
+        },
+        "event": {
+          "type": "string",
+          "title": "Stop at",
+          "default": "periapsis",
+          "enum": [
+            "periapsis",
+            "apoapsis"
+          ]
+        },
+        "maxDays": {
+          "type": "number",
+          "title": "Time limit (days)",
+          "default": 5,
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string",
+          "title": "Propagator",
+          "default": "kepler",
+          "enum": [
+            "kepler",
+            "rk4"
+          ]
+        }
+      }
+    },
+    "impulse": {
+      "title": "Impulsive maneuver (Δv)",
+      "description": "Instantaneous velocity change. VNB frame: V = along velocity (prograde), N = orbit normal, B = V×N (outward). Inertial frame: ecliptic XYZ components.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "impulse",
+          "title": "Segment type"
+        },
+        "frame": {
+          "type": "string",
+          "title": "Frame",
+          "default": "vnb",
+          "enum": [
+            "vnb",
+            "inertial"
+          ]
+        },
+        "dv1": {
+          "type": "number",
+          "title": "Δv₁ V/x (km/s)",
+          "default": 0.1
+        },
+        "dv2": {
+          "type": "number",
+          "title": "Δv₂ N/y (km/s)",
+          "default": 0
+        },
+        "dv3": {
+          "type": "number",
+          "title": "Δv₃ B/z (km/s)",
+          "default": 0
+        }
+      }
+    },
+    "separate": {
+      "title": "Separate from another vehicle",
+      "description": "Initializes this vehicle from the exact state of another mission vehicle at the end of a selected parent segment, then applies an optional small separation impulse. Use this as the first segment of a branch vehicle; it does not reset an already-flying vehicle.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "separate",
+          "title": "Segment type"
+        },
+        "fromVehicle": {
+          "type": "string",
+          "title": "Separate from vehicle",
+          "default": "primary",
+          "minLength": 1,
+          "x-mtp-ref": "vehicle"
+        },
+        "afterSegment": {
+          "type": "number",
+          "title": "After parent segment (1-based)",
+          "default": 1,
+          "minimum": 1
+        },
+        "delayMin": {
+          "type": "number",
+          "title": "Delay after segment (min)",
+          "default": 0,
+          "minimum": 0
+        },
+        "frame": {
+          "type": "string",
+          "title": "Separation frame",
+          "default": "vnb",
+          "enum": [
+            "vnb",
+            "inertial"
+          ]
+        },
+        "dv1": {
+          "type": "number",
+          "title": "Separation dv1 V/x (km/s)",
+          "default": 0.001
+        },
+        "dv2": {
+          "type": "number",
+          "title": "Separation dv2 N/y (km/s)",
+          "default": 0
+        },
+        "dv3": {
+          "type": "number",
+          "title": "Separation dv3 B/z (km/s)",
+          "default": 0
+        }
+      }
+    },
+    "rendezvous": {
+      "title": "Rendezvous with vehicle",
+      "description": "Targets another mission vehicle on the shared UTC timeline. Long timelines use a passive phasing wait followed by a bounded, single-revolution terminal Lambert leg and an ideal velocity match. This is deterministic design guidance, not autonomous relative-navigation or proximity-operations GNC.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "rendezvous",
+          "title": "Segment type"
+        },
+        "targetVehicle": {
+          "type": "string",
+          "title": "Target vehicle",
+          "default": "primary",
+          "minLength": 1,
+          "x-mtp-ref": "vehicle"
+        },
+        "tofHours": {
+          "type": "number",
+          "title": "Time of flight (hours)",
+          "default": 6,
+          "minimum": 0.001
+        },
+        "direction": {
+          "type": "string",
+          "title": "Transfer direction",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "prograde",
+            "retrograde"
+          ]
+        },
+        "maxDvKms": {
+          "type": "number",
+          "title": "Maximum total dv (km/s)",
+          "default": 5,
+          "minimum": 0.001
+        },
+        "terminalRangeKm": {
+          "type": "number",
+          "title": "Terminal range tolerance (km)",
+          "default": 0.001,
+          "minimum": 0.000001
+        }
+      }
+    },
+    "dock": {
+      "title": "Dock / capture vehicle",
+      "description": "Joins this vehicle to a target only when the instantaneous range and relative speed are inside explicit capture limits. A joined vehicle follows the target's exact propagated state during later Coast segments. Contact loads, attitude, ports, and collision dynamics are outside this bounded mission-design model.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "dock",
+          "title": "Segment type"
+        },
+        "targetVehicle": {
+          "type": "string",
+          "title": "Dock with vehicle",
+          "default": "primary",
+          "minLength": 1,
+          "x-mtp-ref": "vehicle"
+        },
+        "captureRangeKm": {
+          "type": "number",
+          "title": "Capture range (km)",
+          "default": 0.00025,
+          "minimum": 0.000001
+        },
+        "captureRateMps": {
+          "type": "number",
+          "title": "Capture relative speed (m/s)",
+          "default": 0.2,
+          "minimum": 0.000001
+        }
+      }
+    },
+    "undock": {
+      "title": "Undock / depart vehicle",
+      "description": "Releases a joined vehicle from its current docking target and applies an optional small departure impulse. The two vehicles then continue on independent state histories.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "undock",
+          "title": "Segment type"
+        },
+        "frame": {
+          "type": "string",
+          "title": "Departure frame",
+          "default": "vnb",
+          "enum": [
+            "vnb",
+            "inertial"
+          ]
+        },
+        "dv1": {
+          "type": "number",
+          "title": "Departure dv1 V/x (km/s)",
+          "default": -0.001
+        },
+        "dv2": {
+          "type": "number",
+          "title": "Departure dv2 N/y (km/s)",
+          "default": 0
+        },
+        "dv3": {
+          "type": "number",
+          "title": "Departure dv3 B/z (km/s)",
+          "default": 0
+        }
+      }
+    },
+    "hohmann": {
+      "title": "Hohmann transfer (about current body)",
+      "description": "Classic two-burn transfer between near-circular orbits: Δv₁ = √(μ/r₁)(√(2r₂/(r₁+r₂))−1), coast half the transfer ellipse, then circularize. Assumes the start orbit is circular.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "hohmann",
+          "title": "Segment type"
+        },
+        "rTargetKm": {
+          "type": "number",
+          "title": "Target orbit radius (km)",
+          "default": 42164,
+          "minimum": 1
+        }
+      }
+    },
+    "transfer": {
+      "title": "Transfer to body (Lambert)",
+      "description": "Solves Lambert's problem from the current position to the target body's future position, applies the required Δv, and coasts. If a flyby periapsis is set, the aim point is offset iteratively to hit that periapsis (simplified B-plane targeting). Target must orbit the current central body. The Vary/Achieve toggle exposes a bounded arrival-periapsis target; use the Windows pane to vary departure date and time of flight before applying that target.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "transfer",
+          "title": "Segment type"
+        },
+        "target": {
+          "type": "string",
+          "title": "Target body",
+          "default": "moon",
+          "enum": [
+            "sun",
+            "mercury",
+            "venus",
+            "earth",
+            "moon",
+            "mars",
+            "phobos",
+            "deimos",
+            "jupiter",
+            "io",
+            "europa",
+            "ganymede",
+            "callisto",
+            "saturn",
+            "enceladus",
+            "titan",
+            "uranus",
+            "neptune",
+            "triton",
+            "pluto",
+            "charon",
+            "ceres",
+            "eris",
+            "haumea",
+            "makemake",
+            "vesta",
+            "pallas",
+            "hygiea",
+            "psyche",
+            "eros",
+            "bennu",
+            "ryugu",
+            "apophis",
+            "didymos"
+          ]
+        },
+        "tofDays": {
+          "type": "number",
+          "title": "Time of flight (days)",
+          "default": 3,
+          "minimum": 0.001
+        },
+        "periKm": {
+          "type": "number",
+          "title": "Target periapsis alt (km, blank = center)",
+          "default": 110,
+          "description": "Optional. Target periapsis alt (km, blank = center)"
+        },
+        "targetMode": {
+          "type": "string",
+          "title": "Target solver (Vary/Achieve)",
+          "default": "off",
+          "enum": [
+            "off",
+            "arrival-periapsis"
+          ]
+        },
+        "targetValue": {
+          "type": "number",
+          "title": "Target arrival periapsis alt (km)",
+          "default": 110,
+          "minimum": 0
+        },
+        "aimOffsetKm": {
+          "type": "number",
+          "title": "Fixed B-plane aim offset (km; blank = solve periapsis)",
+          "default": "",
+          "minimum": 0,
+          "description": "Optional. Fixed B-plane aim offset (km; blank = solve periapsis)"
+        },
+        "side": {
+          "type": "string",
+          "title": "Pass side",
+          "default": "A",
+          "enum": [
+            "A",
+            "B"
+          ]
+        },
+        "optWait": {
+          "type": "string",
+          "title": "Ignition point",
+          "default": "optimal",
+          "enum": [
+            "optimal",
+            "immediate"
+          ]
+        }
+      }
+    },
+    "depart": {
+      "title": "Interplanetary departure",
+      "description": "Patched-conic escape: solves Lambert in the parent frame (e.g. heliocentric) to the target's future position, giving v∞ and C3 = v∞². The applied injection vector, event Δv, and C3 come from one explicit source-body hyperbola. The spacecraft then spends real simulation time coasting to the source SOI before a position- and velocity-continuous frame handoff; the date-pinned arrival epoch is retained.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "depart",
+          "title": "Segment type"
+        },
+        "target": {
+          "type": "string",
+          "title": "Target body",
+          "default": "mars",
+          "enum": [
+            "sun",
+            "mercury",
+            "venus",
+            "earth",
+            "moon",
+            "mars",
+            "phobos",
+            "deimos",
+            "jupiter",
+            "io",
+            "europa",
+            "ganymede",
+            "callisto",
+            "saturn",
+            "enceladus",
+            "titan",
+            "uranus",
+            "neptune",
+            "triton",
+            "pluto",
+            "charon",
+            "ceres",
+            "eris",
+            "haumea",
+            "makemake",
+            "vesta",
+            "pallas",
+            "hygiea",
+            "psyche",
+            "eros",
+            "bennu",
+            "ryugu",
+            "apophis",
+            "didymos"
+          ]
+        },
+        "tofDays": {
+          "type": "number",
+          "title": "Time of flight (days)",
+          "default": 210,
+          "minimum": 1
+        },
+        "periKm": {
+          "type": "number",
+          "title": "Arrival periapsis alt (km, blank = center)",
+          "default": 400,
+          "description": "Optional. Arrival periapsis alt (km, blank = center)"
+        },
+        "aimOffsetKm": {
+          "type": "number",
+          "title": "Fixed B-plane aim offset (km; blank = solve periapsis)",
+          "default": "",
+          "minimum": 0,
+          "description": "Optional. Fixed B-plane aim offset (km; blank = solve periapsis)"
+        },
+        "side": {
+          "type": "string",
+          "title": "Pass side",
+          "default": "A",
+          "enum": [
+            "A",
+            "B"
+          ]
+        }
+      }
+    },
+    "insertion": {
+      "title": "Orbit insertion (at apsis)",
+      "description": "Coasts to the next periapsis (or apoapsis), then burns there: circular (v = √(μ/r)) or elliptical with a chosen opposite apsis (vis-viva). At-apoapsis + circular is the classic launch-circularization (OMS-2) burn. Preserves the orbit plane.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "insertion",
+          "title": "Segment type"
+        },
+        "at": {
+          "type": "string",
+          "title": "Burn at",
+          "default": "periapsis",
+          "enum": [
+            "periapsis",
+            "apoapsis"
+          ]
+        },
+        "shape": {
+          "type": "string",
+          "title": "Final orbit",
+          "default": "circular",
+          "enum": [
+            "circular",
+            "elliptical"
+          ]
+        },
+        "apoKm": {
+          "type": "number",
+          "title": "Other apsis alt (km, if elliptical)",
+          "default": 10000,
+          "minimum": 0
+        },
+        "targetMode": {
+          "type": "string",
+          "title": "Target solver (Vary/Achieve)",
+          "default": "off",
+          "enum": [
+            "off",
+            "opposite-apsis",
+            "period"
+          ]
+        },
+        "targetValue": {
+          "type": "number",
+          "title": "Target altitude (km) / period (h)",
+          "default": 35786,
+          "minimum": 0
+        },
+        "maxDays": {
+          "type": "number",
+          "title": "Apsis wait limit (days)",
+          "default": 5,
+          "minimum": 0
+        }
+      }
+    },
+    "flyby": {
+      "title": "Gravity assist (flyby)",
+      "description": "Unpowered (optionally powered) swing through the current body's sphere of influence: coasts to the encounter periapsis and back out. The hyperbolic pass rotates the v∞ vector, changing the orbit about the parent body for free — the physics behind VVEJGA-style tours. Precede with a Transfer/Depart targeting a flyby periapsis; follow with the next Transfer. Reports v∞ in/out, turn angle δ = 2·asin(1/e), and the Δv gained.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "flyby",
+          "title": "Segment type"
+        },
+        "dvKms": {
+          "type": "number",
+          "title": "Periapsis burn Δv (km/s, + prograde)",
+          "default": 0
+        },
+        "maxDays": {
+          "type": "number",
+          "title": "SOI transit time limit (days)",
+          "default": 40,
+          "minimum": 0.01
+        }
+      }
+    },
+    "observe": {
+      "title": "Observation window",
+      "description": "Coasts while the instruments point at a target body — e.g. imaging Io during a Jupiter flyby, or Titan on approach to Saturn. The ground-track panel switches to a map of the observed body with the sub-spacecraft point, its track over the window, and the visible-disk footprint; the POV camera looks at the target. Purely an instrument-pointing window — the trajectory is a normal coast.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "observe",
+          "title": "Segment type"
+        },
+        "target": {
+          "type": "string",
+          "title": "Observe body",
+          "default": "io",
+          "enum": [
+            "sun",
+            "mercury",
+            "venus",
+            "earth",
+            "moon",
+            "mars",
+            "phobos",
+            "deimos",
+            "jupiter",
+            "io",
+            "europa",
+            "ganymede",
+            "callisto",
+            "saturn",
+            "enceladus",
+            "titan",
+            "uranus",
+            "neptune",
+            "triton",
+            "pluto",
+            "charon",
+            "ceres",
+            "eris",
+            "haumea",
+            "makemake",
+            "vesta",
+            "pallas",
+            "hygiea",
+            "psyche",
+            "eros",
+            "bennu",
+            "ryugu",
+            "apophis",
+            "didymos"
+          ]
+        },
+        "days": {
+          "type": "number",
+          "title": "Duration (days)",
+          "default": 1.5,
+          "minimum": 0.001
+        },
+        "mode": {
+          "type": "string",
+          "title": "Propagator",
+          "default": "kepler",
+          "enum": [
+            "kepler",
+            "rk4"
+          ]
+        }
+      }
+    },
+    "return": {
+      "title": "Return / reentry targeting (Lambert)",
+      "description": "Targets a low pass over a body (e.g. Earth entry corridor): Lambert transfer to an aim point at the chosen periapsis radius. Used for trans-Earth injection and free-return corrections. Target must be the current central body or its parent.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "return",
+          "title": "Segment type"
+        },
+        "target": {
+          "type": "string",
+          "title": "Target body",
+          "default": "earth",
+          "enum": [
+            "sun",
+            "mercury",
+            "venus",
+            "earth",
+            "moon",
+            "mars",
+            "phobos",
+            "deimos",
+            "jupiter",
+            "io",
+            "europa",
+            "ganymede",
+            "callisto",
+            "saturn",
+            "enceladus",
+            "titan",
+            "uranus",
+            "neptune",
+            "triton",
+            "pluto",
+            "charon",
+            "ceres",
+            "eris",
+            "haumea",
+            "makemake",
+            "vesta",
+            "pallas",
+            "hygiea",
+            "psyche",
+            "eros",
+            "bennu",
+            "ryugu",
+            "apophis",
+            "didymos"
+          ]
+        },
+        "tofDays": {
+          "type": "number",
+          "title": "Time of flight (days)",
+          "default": 2.7,
+          "minimum": 0.01
+        },
+        "periKm": {
+          "type": "number",
+          "title": "Target periapsis alt (km)",
+          "default": 40
+        },
+        "optWait": {
+          "type": "string",
+          "title": "Ignition point",
+          "default": "optimal",
+          "enum": [
+            "optimal",
+            "immediate"
+          ]
+        }
+      }
+    },
+    "land": {
+      "title": "Land / touch down",
+      "description": "Idealized descent: orbital velocity is zeroed (Δv ≈ current speed) and a schematic descent arc is drawn. No descent guidance or terrain — a placeholder for a real landing.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "land",
+          "title": "Segment type"
+        },
+        "descentHours": {
+          "type": "number",
+          "title": "Descent duration (h)",
+          "default": 0.75,
+          "minimum": 0.01
+        },
+        "stayDays": {
+          "type": "number",
+          "title": "Surface stay (days)",
+          "default": 0.9,
+          "minimum": 0
+        }
+      }
+    },
+    "ascend": {
+      "title": "Ascend to orbit",
+      "description": "Instantaneous insertion from the surface into a circular orbit through the current site, in the plane of the pre-landing orbit. Δv estimate ≈ circular speed (real ascent costs more).",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "ascend",
+          "title": "Segment type"
+        },
+        "altKm": {
+          "type": "number",
+          "title": "Orbit altitude (km)",
+          "default": 100,
+          "minimum": 1
+        }
+      }
+    },
+    "reentry": {
+      "title": "Atmospheric entry / splashdown",
+      "description": "Coasts until the entry-interface altitude is crossed, then draws a schematic descent to the surface. Requires the incoming trajectory's periapsis to dip below the interface. Ends the mission.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "reentry",
+          "title": "Segment type"
+        },
+        "interfaceKm": {
+          "type": "number",
+          "title": "Entry interface alt (km)",
+          "default": 120,
+          "minimum": 0
+        },
+        "maxDays": {
+          "type": "number",
+          "title": "Time limit (days)",
+          "default": 6,
+          "minimum": 0
+        },
+        "descentMin": {
+          "type": "number",
+          "title": "Descent duration (min)",
+          "default": 20,
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

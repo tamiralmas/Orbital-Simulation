@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Texture fetcher - Mission Trajectory Planner</title>
+<style>
+  body { font-family: "Segoe UI", sans-serif; background: #f5f4ef; color: #1c1d20; margin: 0; padding: 28px 36px; }
+  h1 { font-size: 18px; letter-spacing: 1px; text-transform: uppercase; }
+  h1 span { color: #e5541e; }
+  p { max-width: 860px; font-size: 13.5px; line-height: 1.5; }
+  code { background: #fff; border: 1px solid #d8d6cd; padding: 1px 5px; font-size: 12px; }
+  table { border-collapse: collapse; margin: 18px 0; font-size: 13px; width: 100%; max-width: 1220px; }
+  td, th { border: 1px solid #d8d6cd; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #fbfaf6; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+  td.body { font-weight: 600; width: 90px; }
+  .status { font-size: 11.5px; color: #55564f; margin-top: 4px; max-width: 300px; }
+  .status.ok { color: #2f9e5b; }
+  .status.fail { color: #c62828; }
+  img.chosen { height: 84px; border: 1px solid #d8d6cd; display: block; }
+  .alts { display: flex; flex-wrap: wrap; gap: 6px; max-width: 560px; }
+  .alt { cursor: pointer; border: 2px solid transparent; text-align: center; font-size: 10px; color: #55564f; }
+  .alt img { height: 44px; display: block; border: 1px solid #d8d6cd; }
+  .alt.sel { border-color: #e5541e; }
+  .alt.none { display: flex; align-items: center; justify-content: center; height: 46px; width: 64px; border: 1px dashed #8a887e; }
+  .research { margin-top: 6px; display: flex; gap: 4px; }
+  .research input { font-size: 11.5px; padding: 3px 6px; border: 1px solid #d8d6cd; width: 240px; }
+  .research button { padding: 3px 10px; font-size: 11px; }
+  button { background: #1c1d20; color: #fbfaf6; border: none; padding: 10px 22px; font-size: 13px; letter-spacing: 1px; cursor: pointer; }
+  button:disabled { background: #8a887e; cursor: default; }
+  #dl { background: #e5541e; display: none; margin-left: 10px; }
+  #note { display: none; background: #fdf1e9; border: 1px solid #e5541e; color: #a33a12; padding: 10px 14px; max-width: 860px; font-size: 13px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1><span>&#9672;</span> Texture fetcher (browser edition)</h1>
+<p>Downloads real NASA/USGS/ESA/JAXA global maps. Earth and Moon use fixed
+2048&times;1024 NASA sources (Visible Earth Blue Marble and the Moon Trek LRO WAC global mosaic).
+Other sources are the Celestia project content pack (GitHub) and Wikimedia Commons mission mosaics.
+For each body the best match is picked automatically - <b>click any thumbnail in the
+Alternatives column to swap it</b> if the automatic pick looks wrong (dimensions are shown;
+prefer maps close to 2:1). Use the search box under the thumbnails to look for something
+more specific, or the dashed box to keep the current/gradient look for that body.</p>
+<p><b>Steps:</b> 1) Fetch; 2) review previews, swap any bad picks; 3) Download and save over
+<code>js/textures-data.js</code>; 4) reload the app.</p>
+<button id="go">Fetch textures</button>
+<button id="dl">Download textures-data.js</button>
+<div id="note"></div>
+<table id="tbl"><thead><tr><th>Body</th><th>Chosen map</th><th>Alternatives (click to swap)</th></tr></thead><tbody></tbody></table>
+
+<script src="js/textures-data.js"></script>
+<script>
+"use strict";
+const EXISTING = (typeof globalThis.MTP_TEXTURE_DATA === "object" && globalThis.MTP_TEXTURE_DATA) || {};
+const PLANETS = ["sun","mercury","venus","earth","moon","mars","jupiter","saturn","uranus","neptune","ceres","haumea","makemake","eris"];
+const AGENCY = [
+  {
+    id: "earth",
+    src: "NASA Visible Earth",
+    full: "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57730/land_ocean_ice_2048.jpg",
+    preview: "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57730/land_ocean_ice_2048.jpg",
+    label: "2048x1024",
+    note: "NASA Visible Earth Blue Marble (Terra/MODIS), 2048x1024",
+    preserve: true,
+  },
+  {
+    id: "moon",
+    src: "NASA Moon Trek",
+    tiles: "https://trek.nasa.gov/tiles/Moon/EQ/LRO_WAC_Mosaic_Global_303ppd_v02/1.0.0/default/default028mm/2/{row}/{col}.jpg",
+    preview: "https://trek.nasa.gov/tiles/Moon/EQ/LRO_WAC_Mosaic_Global_303ppd_v02/1.0.0/default/default028mm/0/0/0.jpg",
+    label: "2048x1024",
+    note: "NASA Moon Trek LRO WAC Global Mosaic v02, equirectangular 2048x1024 stitch",
+  },
+];
+const WANTED = [
+  { id: "io",        q: "Io global mosaic map Galileo Voyager" },
+  { id: "europa",    q: "Europa global mosaic map Galileo" },
+  { id: "ganymede",  q: "Ganymede global mosaic map" },
+  { id: "callisto",  q: "Callisto global mosaic map" },
+  { id: "titan",     q: "Titan global map Cassini ISS mosaic" },
+  { id: "enceladus", q: "Enceladus global map mosaic Cassini" },
+  { id: "triton",    q: "Triton global color map Voyager" },
+  { id: "phobos",    q: "Phobos global map mosaic Viking" },
+  { id: "deimos",    q: "Deimos global map mosaic" },
+  { id: "pluto",     q: "Pluto global color map New Horizons" },
+  { id: "charon",    q: "Charon global map New Horizons" },
+  { id: "ceres",     q: "Ceres global map Dawn HAMO mosaic" },
+  { id: "vesta",     q: "Vesta global map Dawn mosaic" },
+  { id: "bennu",     q: "Bennu global mosaic OSIRIS-REx" },
+  { id: "ryugu",     q: "Ryugu global map Hayabusa2 mosaic" },
+  { id: "eros",      q: "Eros global map NEAR mosaic" },
+];
+const OUT = {};          // id -> { data, note }
+const CANDS = {};        // id -> [candidate]
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const $ = (id) => document.getElementById(id);
+
+/* ------------------------------- fetch helpers ------------------------------ */
+async function fetchJson(url) {
+  const r = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+async function blobDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result));
+    reader.addEventListener("error", () => reject(reader.error || new Error("could not encode image")));
+    reader.readAsDataURL(blob);
+  });
+}
+async function toDataUrl(imgUrl, options) {
+  const opts = options || {};
+  if (opts.tiles) {
+    const cv = document.createElement("canvas");
+    cv.width = 2048; cv.height = 1024;
+    const cx = cv.getContext("2d");
+    for (let row = 0; row < 4; row += 1) {
+      for (let col = 0; col < 8; col += 1) {
+        const url = opts.tiles.replace("{row}", row).replace("{col}", col);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Moon Trek tile " + row + "/" + col + " HTTP " + response.status);
+        const tile = await createImageBitmap(await response.blob());
+        if (tile.width !== 256 || tile.height !== 256) {
+          tile.close();
+          throw new Error("Moon Trek tile " + row + "/" + col + " is not 256x256");
+        }
+        cx.drawImage(tile, col * 256, row * 256);
+        tile.close();
+      }
+    }
+    return cv.toDataURL("image/jpeg", 0.92);
+  }
+  const r = await fetch(imgUrl);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const blob = await r.blob();
+  const bmp = await createImageBitmap(blob);
+  if (opts.preserve) {
+    if (bmp.width !== 2048 || bmp.height !== 1024) {
+      bmp.close();
+      throw new Error("official map is " + bmp.width + "x" + bmp.height + "; expected 2048x1024");
+    }
+    bmp.close();
+    return blobDataUrl(blob);
+  }
+  const cv = document.createElement("canvas");
+  cv.width = 1024; cv.height = 512;
+  cv.getContext("2d").drawImage(bmp, 0, 0, 1024, 512);
+  bmp.close();
+  return cv.toDataURL("image/jpeg", 0.82);
+}
+
+/* Celestia content pack (GitHub): probe raw file URLs directly - no API quota */
+async function probeCelestia(id) {
+  for (const p of ["medres/" + id + ".png", "medres/" + id + ".jpg",
+                   "lores/" + id + ".jpg", "lores/" + id + ".png"]) {
+    const url = "https://raw.githubusercontent.com/CelestiaProject/CelestiaContent/master/textures/" + p;
+    try {
+      const r = await fetch(url, { method: "HEAD" });
+      if (r.ok) return { src: "Celestia", note: "Celestia content pack (NASA/USGS imagery): " + p,
+                         full: url, preview: url, label: p.split("/")[0], score: 99 };
+    } catch (e) { /* offline; commons takes over */ }
+  }
+  return null;
+}
+
+/* Commons search returning the top scored candidates (not just the best) */
+async function commonsCandidates(query, n, requireWord) {
+  const api = "https://commons.wikimedia.org/w/api.php?action=query&format=json&formatversion=2&origin=*" +
+    "&generator=search&gsrnamespace=6&gsrlimit=30&gsrsearch=" + encodeURIComponent(query) +
+    "&prop=imageinfo&iiprop=url%7Csize%7Cmime&iiurlwidth=2048";
+  const resp = await fetchJson(api);
+  if (!resp.query || !resp.query.pages) return [];
+  const list = [];
+  for (const pg of resp.query.pages) {
+    if (!pg.imageinfo) continue;
+    const ii = pg.imageinfo[0];
+    if (!["image/jpeg", "image/png", "image/tiff"].includes(ii.mime)) continue;
+    if (ii.mime === "image/tiff" && !ii.thumburl) continue;
+    if (ii.width < 800) continue;
+    const aspect = ii.width / ii.height;
+    if (aspect < 1.3 || aspect > 2.8) continue;
+    const name = pg.title.toLowerCase();
+    // a map of Io must have "io" in its filename - kills matches that only
+    // mention the body in the page description (this is how Eros once got
+    // a Blue Marble photo of Egypt)
+    if (requireWord && !name.includes(requireWord.toLowerCase())) continue;
+    let score = Math.min(ii.width, 8192) / 1000;
+    for (const kw of ["map", "mosaic", "cylindrical", "global", "equirect"]) if (name.includes(kw)) score += 4;
+    if (name.includes("global mosaic") || name.includes("color map")) score += 4;
+    for (const bad of ["polar", "pole", "grid", "label", "annotat", "topo", "elevation", "dem", "altimet", "shaded", "relief",
+                       "geolog", "mineral", "mercator", "hemisphere", "3d", "model", "shape",
+                       "borders", "blue marble", "anaglyph", "landing", "site", "cape", "periphery"])
+      if (name.includes(bad)) score -= 7;
+    score -= Math.abs(aspect - 2) * 2;                    // prefer true equirectangular
+    const full = ii.thumburl || ii.url;
+    list.push({
+      src: "Commons", note: pg.title + " - via Wikimedia Commons",
+      full, preview: /\/\d+px-/.test(full) ? full.replace(/\/\d+px-/, "/320px-") : full,
+      label: ii.width + "x" + ii.height, score,
+    });
+  }
+  list.sort((a, b) => b.score - a.score);
+  return list.slice(0, n || 5);
+}
+
+async function gatherCandidates(body) {
+  const out = [];
+  const cel = await probeCelestia(body.id);
+  if (cel) out.push(cel);
+  try {
+    await sleep(1400);
+    out.push(...await commonsCandidates(body.q, 5, body.id));
+  } catch (e) { /* ignore */ }
+  if (out.length < 2) {
+    try { await sleep(1400); out.push(...await commonsCandidates(body.id + " global map", 4, body.id)); } catch (e) {}
+  }
+  return out;
+}
+
+/* ---------------------------------- UI rows --------------------------------- */
+const tbody = document.querySelector("#tbl tbody");
+const rowEls = {};
+function ensureRow(id) {
+  if (rowEls[id]) return rowEls[id];
+  const tr = document.createElement("tr");
+  const tdB = document.createElement("td"); tdB.className = "body"; tdB.textContent = id;
+  const tdC = document.createElement("td");
+  const tdA = document.createElement("td");
+  tr.append(tdB, tdC, tdA);
+  tbody.appendChild(tr);
+  return (rowEls[id] = { tdC, tdA });
+}
+function setChosen(id, html, cls, msg) {
+  const r = ensureRow(id);
+  r.tdC.innerHTML = (html || "") + '<div class="status ' + (cls || "") + '">' + msg + "</div>";
+}
+async function select(id, cand) {
+  setChosen(id, "", "", "downloading " + cand.src + " map...");
+  try {
+    const data = await toDataUrl(cand.full, cand);
+    OUT[id] = { data, note: cand.note };
+    setChosen(id, '<img class="chosen" src="' + data + '">', "ok", cand.note);
+  } catch (e) {
+    delete OUT[id];
+    setChosen(id, "", "fail", "download failed (" + e.message + ") - pick an alternative");
+  }
+  renderAlts(id);
+}
+function renderAlts(id) {
+  const r = ensureRow(id);
+  const cands = CANDS[id] || [];
+  const wrap = document.createElement("div"); wrap.className = "alts";
+  for (const c of cands) {
+    const d = document.createElement("div");
+    d.className = "alt" + (OUT[id] && OUT[id].note === c.note ? " sel" : "");
+    d.title = c.note;
+    d.innerHTML = '<img loading="lazy" src="' + c.preview + '">' + c.src + " " + c.label;
+    d.addEventListener("click", () => select(id, c));
+    wrap.appendChild(d);
+  }
+  const none = document.createElement("div");
+  none.className = "alt none" + (OUT[id] ? "" : " sel");
+  none.textContent = EXISTING[id] ? "keep current" : "none";
+  none.title = "Do not replace this body's map";
+  none.addEventListener("click", () => {
+    delete OUT[id];
+    setChosen(id, EXISTING[id] ? '<img class="chosen" src="' + EXISTING[id] + '">' : "", "", "keeping current");
+    renderAlts(id);
+  });
+  wrap.appendChild(none);
+  const re = document.createElement("div"); re.className = "research";
+  re.innerHTML = '<input placeholder="custom Commons search..." value=""><button>Search</button>';
+  re.querySelector("button").addEventListener("click", async () => {
+    const q = re.querySelector("input").value.trim();
+    if (!q) return;
+    setChosen(id, "", "", "searching Commons for: " + q);
+    try {
+      const extra = await commonsCandidates(q, 6);
+      CANDS[id] = extra.concat((CANDS[id] || []).filter((c) => c.src === "Celestia"));
+      setChosen(id, OUT[id] ? '<img class="chosen" src="' + OUT[id].data + '">' : "", OUT[id] ? "ok" : "",
+        extra.length ? extra.length + " result(s) - click one" : "nothing suitable found");
+    } catch (e) { setChosen(id, "", "fail", "search failed: " + e.message); }
+    renderAlts(id);
+  });
+  r.tdA.innerHTML = "";
+  r.tdA.append(wrap, re);
+}
+
+/* ---------------------------------- main run -------------------------------- */
+async function run() {
+  $("go").disabled = true;
+  for (const cand of AGENCY) {
+    CANDS[cand.id] = [cand];
+    await select(cand.id, cand);
+  }
+  const jobs = WANTED.slice();
+  for (const pid of PLANETS) {
+    if (!EXISTING[pid] && !AGENCY.some((item) => item.id === pid)) {
+      jobs.push({ id: pid, q: pid + " planet global map NASA equirectangular" });
+    }
+  }
+  for (const body of jobs) {
+    setChosen(body.id, "", "", "searching...");
+    CANDS[body.id] = await gatherCandidates(body);
+    if (CANDS[body.id].length) {
+      await select(body.id, CANDS[body.id][0]);
+    } else {
+      const noReal = ["haumea", "makemake", "eris"].includes(body.id);
+      setChosen(body.id, "", "fail", noReal ? "no real imagery exists for this body"
+                                            : "no map found - try a custom search");
+      renderAlts(body.id);
+    }
+  }
+  $("note").style.display = "block";
+  $("note").textContent = "Review the previews, swap anything that looks wrong, then click Download and save the file over js/textures-data.js.";
+  $("dl").style.display = "inline-block";
+}
+
+function buildFile() {
+  const L = [];
+  L.push("/* Generated by get_textures.html on " + new Date().toISOString());
+  L.push(" * Earth: NASA Visible Earth Blue Marble (Terra/MODIS), 2048x1024.");
+  L.push(" * Moon: NASA Moon Trek LRO WAC Global Mosaic v02, 2048x1024.");
+  L.push(" * Other planets: Solar System Scope NASA-imagery pack, CC-BY 4.0.");
+  L.push(" * Other moons and minor bodies: Celestia NASA/USGS pack and Wikimedia Commons mission mosaics. */");
+  L.push('"use strict";');
+  L.push("globalThis.MTP_TEXTURE_DATA = {};");
+  const ids = new Set([...Object.keys(EXISTING), ...Object.keys(OUT)]);
+  for (const id of ids) {
+    if (OUT[id]) L.push("// " + id + ": " + OUT[id].note);
+    L.push('globalThis.MTP_TEXTURE_DATA["' + id + '"] = "' + (OUT[id] ? OUT[id].data : EXISTING[id]) + '";');
+  }
+  return L.join("\n");
+}
+$("go").addEventListener("click", run);
+$("dl").addEventListener("click", () => {
+  const blob = new Blob([buildFile()], { type: "text/javascript" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "textures-data.js";
+  a.click();
+});
+</script>
+</body>
+</html>

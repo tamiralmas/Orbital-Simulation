@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Mission Tracker - Mission Trajectory Planner</title>
+<meta name="description" content="Explore a combined catalog of 100 Earth-orbit and 100 deep-space missions.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/theme.css">
+</head>
+<body>
+
+<div id="app" class="live-app" data-theme="blueprint">
+  <header id="liveTopbar">
+    <a class="live-brand" href="index.html" aria-label="Return to Mission Trajectory Planner">
+      <span class="live-brand-title">Mission Trajectory Planner</span>
+      <span id="liveSceneTitle">Earth 100</span>
+      <span class="live-brand-sub">Earth 100 / Deep 100</span>
+    </a>
+
+    <div id="liveTopStatusSlot">
+      <div id="liveTopStatus" class="live-top-status" data-state="cached" role="status" aria-live="polite">
+        <div class="live-source-line"><span id="liveSourceDot" aria-hidden="true"></span><span id="liveSource">Catalog ready; checking orbital elements</span></div>
+        <div id="liveAccuracy" class="live-accuracy">Public OMM-derived SGP4/SDP4 orbital predictions / not telemetry / not for pass prediction or operations</div>
+      </div>
+    </div>
+
+    <div class="live-top-actions">
+      <div class="live-viewbtns" role="group" aria-label="Live camera and tracking views">
+        <button id="btnLivePov" type="button" title="Onboard spacecraft camera" aria-pressed="false" disabled>POV</button>
+        <button id="btnLiveGround" type="button" title="Ground track / body-fixed surface view (G)"
+          aria-controls="liveGroundPanel" aria-expanded="false" aria-pressed="false">Track</button>
+      </div>
+      <div class="live-scopebtns" role="group" aria-label="Mission tracker scope">
+        <button id="btnTrackerEarth" class="tracker-scope" type="button" aria-pressed="true">Earth 100</button>
+        <button id="btnTrackerDeep" class="tracker-scope" type="button" aria-pressed="false">Deep 100</button>
+      </div>
+      <div id="liveTopFrameSlot">
+        <div id="liveDeepViewControls" class="live-deep-view-controls" hidden>
+          <label for="liveFocusBody">Focus</label>
+          <select id="liveFocusBody">
+            <option value="sun">Sun</option>
+          </select>
+          <label for="liveFrameBody">Frame</label>
+          <select id="liveFrameBody">
+            <option value="inertial">Sun-centered inertial</option>
+          </select>
+        </div>
+      </div>
+      <div class="live-auxbtns">
+        <button id="btnLiveRefresh" type="button" title="Request current OMM general-perturbations elements when the two-hour source interval allows">Refresh data</button>
+        <button id="btnTheme" type="button" title="Switch between Blueprint and Cinematic UI">Cinematic UI</button>
+        <a class="planner-link" href="index.html">Planner</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="liveLayout">
+    <aside id="liveSidebar" aria-label="Tracked mission catalog">
+      <div class="live-sidebar-head">
+        <div class="live-kicker">01 / Orbiting spacecraft</div>
+        <h1 class="live-sidebar-title">Mission catalog</h1>
+        <p class="live-sidebar-copy">Select a row or marker to inspect its current visualization-grade orbit. Catalog membership does not assert operational status.</p>
+        <div class="live-filter-grid">
+          <input id="liveSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search name, agency, NORAD" aria-label="Search missions">
+          <select id="liveGroup" aria-label="Filter by catalog group">
+            <option value="ALL">All groups</option>
+            <option value="STATIONS">Stations</option>
+            <option value="SCIENCE">Science</option>
+            <option value="RESOURCE">Earth observation</option>
+          </select>
+        </div>
+        <div id="liveCatalogMeta">100 catalog entries / waiting for elements</div>
+        <div id="liveSidebarStatusSlot"></div>
+      </div>
+      <nav id="liveMissionList" aria-label="One hundred tracked spacecraft"></nav>
+      <div id="liveEmpty" hidden>No catalog entries match this filter.</div>
+    </aside>
+
+    <section id="liveViz" aria-label="Interactive Earth-orbit view">
+      <canvas id="liveCanvas" tabindex="0" role="img" aria-describedby="liveAccuracy" aria-label="Interactive three-dimensional Earth view with mission markers. Drag to rotate, use the mouse wheel to zoom, and click a marker for details."></canvas>
+
+      <div id="liveDisplayPanel">
+        <button id="btnLiveDisplay" type="button" title="Collapse display options"
+          aria-expanded="true">Display</button>
+        <label><input id="liveOptPaths" type="checkbox" checked> mission paths</label>
+        <label><input id="liveOptMarkers" type="checkbox" checked> mission markers</label>
+        <label><input id="liveOptLabels" type="checkbox" checked> marker labels</label>
+        <label><input id="liveOptGrid" type="checkbox" checked> reference grid</label>
+        <label><input id="liveOptSoi" type="checkbox"> SOI</label>
+        <label><input id="liveOptTextures" type="checkbox" checked> textures</label>
+        <label title="Render everything fully lit - no night side or shading"><input id="liveOptFlat" type="checkbox"> full bright</label>
+        <label class="live-deep-only" data-live-deep-only
+          title="Hide dwarf planets, asteroids, and bodies orbiting them unless one is the active Focus or Frame">
+          <input id="liveOptMinor" type="checkbox" checked> minor bodies
+        </label>
+        <label class="live-deep-only" data-live-deep-only><input id="liveOptOrbits" type="checkbox" checked> reference orbits</label>
+        <label class="live-deep-only" data-live-deep-only
+          title="Show the selected mission's bounded historical Horizons path; this does not create a current position">
+          <input id="liveOptHistory" type="checkbox"> historic mission path
+        </label>
+        <label class="live-deep-only" data-live-deep-only
+          title="Show the five ideal circular restricted three-body equilibrium points. Reference geometry only; not telemetry or navigation data.">
+          <input id="liveOptLagrange" type="checkbox"> L1-L5 (ideal CR3BP)
+        </label>
+        <label class="live-deep-only display-system" data-live-deep-only for="liveCr3bpSystem"
+          title="Choose the ideal CR3BP primary-secondary system used for L1-L5 reference markers">
+          <span>CR3BP system</span>
+          <select id="liveCr3bpSystem" aria-label="Ideal CR3BP Lagrange-point system">
+            <option value="earth-moon">Earth-Moon</option>
+            <option value="sun-earth">Sun-Earth</option>
+          </select>
+        </label>
+        <div id="liveDeepDisplaySlot"></div>
+      </div>
+
+      <button id="btnCatalogToggle" class="edgeTgl live-catalog-edge" type="button"
+        title="Collapse / expand the mission catalog" aria-label="Collapse mission catalog"
+        aria-controls="liveSidebar" aria-expanded="true"></button>
+
+      <section id="liveGroundPanel" aria-labelledby="liveGroundTitle" hidden>
+        <div id="liveGroundHead">
+          <span id="liveGroundTitle">GROUND TRACK</span>
+          <span id="liveGroundStatus" role="status" aria-live="polite">Select a mission</span>
+          <button id="btnLiveGroundClose" type="button" title="Close ground track (G)" aria-label="Close ground track">&times;</button>
+        </div>
+        <canvas id="liveGroundCanvas" width="760" height="380" role="img" aria-label="Ground track for the selected live mission"></canvas>
+      </section>
+
+      <div id="liveLegend" aria-hidden="true">
+        <span class="live-legend-item"><span class="live-legend-swatch stations"></span>Stations</span>
+        <span class="live-legend-item"><span class="live-legend-swatch science"></span>Science</span>
+        <span class="live-legend-item"><span class="live-legend-swatch resource"></span>Earth observation</span>
+      </div>
+      <div id="liveCanvasHint">DRAG ROTATE / WHEEL ZOOM / CLICK SELECT / DOUBLE-CLICK FIT</div>
+      <div id="liveScaleReadout">Earth radius: -- px</div>
+
+      <article id="liveCard" hidden>
+        <button id="liveCardClose" type="button" aria-label="Close mission details">X</button>
+        <span id="liveCardGroup">Science</span>
+        <h2 id="liveCardTitle">Mission</h2>
+        <div id="liveCardMeta">Agency / spacecraft type</div>
+        <p id="liveCardSummary"></p>
+        <div class="live-detail-grid">
+          <div class="live-detail"><span class="live-detail-label">NORAD ID</span><span id="liveDetailNorad" class="live-detail-value">--</span></div>
+          <div class="live-detail"><span class="live-detail-label">Element epoch</span><span id="liveDetailEpoch" class="live-detail-value">--</span></div>
+          <div class="live-detail"><span class="live-detail-label">Altitude at displayed time</span><span id="liveDetailAltitude" class="live-detail-value">--</span></div>
+          <div class="live-detail"><span class="live-detail-label">Speed</span><span id="liveDetailSpeed" class="live-detail-value">--</span></div>
+          <div class="live-detail"><span class="live-detail-label">Perigee / apogee</span><span id="liveDetailApsides" class="live-detail-value">--</span></div>
+          <div class="live-detail"><span class="live-detail-label">Inclination / period</span><span id="liveDetailPlane" class="live-detail-value">--</span></div>
+        </div>
+        <p id="liveCardElementNote">Current public orbital elements have not been loaded for this entry.</p>
+        <div class="live-card-actions">
+          <button id="btnLiveFitSelected" type="button">Fit selected orbit</button>
+          <a id="liveWiki" href="https://en.wikipedia.org/" target="_blank" rel="noopener noreferrer">Wikipedia</a>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer id="liveTransport">
+    <button id="btnLivePlay" type="button" aria-pressed="true">Pause</button>
+    <button id="btnLiveNow" type="button" title="Return the simulation clock to the current UTC time">NOW</button>
+    <select id="liveSpeed" aria-label="Simulation clock speed">
+      <option value="1">1x real time</option>
+      <option value="10">10x</option>
+      <option value="60">60x</option>
+      <option value="600">600x</option>
+      <option value="3600">3600x</option>
+    </select>
+    <button id="btnLiveFitAll" type="button" title="Fit every currently visible marker">Fit shown</button>
+    <button id="btnLiveResetView" type="button">Earth view</button>
+    <div id="liveHud">
+      <span class="live-hud-kicker">Displayed UTC</span>
+      <time id="liveUtc" datetime="">---- -- -- --:--:-- UTC</time>
+      <div class="live-hud-grid">
+        <div class="live-hud-cell live-hud-state"><label>State</label><span id="liveMode" class="is-live">NOW</span></div>
+        <div class="live-hud-cell live-hud-model"><label>Model</label><span id="liveHudModel">SGP4 / SDP4</span></div>
+      </div>
+    </div>
+    <span id="liveTransportNote">CelesTrak OMM + Vallado SGP4/SDP4 prediction; not telemetry or operations. Failed records show a J2 fallback. No maneuver, conjunction, or ground-pass guarantee.</span>
+  </footer>
+</div>
+
+<script src="js/constants.js"></script>
+<script src="js/kepler.js"></script>
+<script src="js/sgp4.js"></script>
+<script src="js/cr3bp.js"></script>
+<!-- Optional generated agency-imagery texture data. A missing file leaves a gradient Earth. -->
+<script src="js/textures-data.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/tracker-shell.js"></script>
+<script src="js/offline.js"></script>
+</body>
+</html>

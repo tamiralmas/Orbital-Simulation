@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mission Trajectory Planner — classic UI</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<header id="topbar">
+  <div id="logo">
+    <span class="mark">◈</span> MISSION TRAJECTORY PLANNER
+    <span class="ver">v1.1 classic</span>
+  </div>
+  <select id="presetSel" title="Load a preset mission"></select>
+  <input id="epochInp" title="Mission epoch (UTC, ISO 8601)" spellcheck="false" />
+  <div class="spacer"></div>
+  <div class="viewbtns">
+    <button id="btnAuto" title="Cinematic auto-camera: close-ups on events, wide shots on cruises (A)">Auto</button>
+    <button id="btnViewSolar" title="Whole solar system">Solar system</button>
+    <button id="btnViewMission" title="Fit the mission around its central body">Mission</button>
+    <button id="btnViewShip" title="Camera follows the spacecraft">Follow ship</button>
+    <button id="btnFocus" title="Zoom to the focused body or spacecraft — double-click a body to focus it (F)">Focus</button>
+    <button id="btnTop" title="Toggle top-down (2D) view">Top ⊙</button>
+  </div>
+  <select id="frameSel" title="Reference frame for the displayed trajectory"></select>
+  <a class="live-link" href="live.html" title="Open the Earth 100 and Deep 100 mission trackers">Live</a>
+</header>
+
+<div id="banner"></div>
+
+<main id="layout">
+
+  <!-- ===================== left: mission editor ===================== -->
+  <aside id="left">
+    <div class="panel-title">MISSION PLAN</div>
+    <input id="missionName" spellcheck="false" />
+    <div id="missionMeta"></div>
+    <div id="segList"></div>
+    <div id="addRow">
+      <select id="addType"></select>
+      <button id="btnAdd" title="Append segment">＋ Add</button>
+    </div>
+    <div id="totals"></div>
+  </aside>
+
+  <!-- ========================= center: viz ========================== -->
+  <section id="viz">
+    <canvas id="cv"></canvas>
+
+    <div id="hud">
+      <div class="hud-row big"><span id="hudMet">T+00:00:00:00</span></div>
+      <div class="hud-row" id="hudDate">—</div>
+      <div class="hud-row"><label>SEGMENT</label><span id="hudSeg">—</span></div>
+      <div class="hud-row"><label>CENTRAL</label><span id="hudCentral">—</span></div>
+      <div class="hud-row"><label>ALT / R</label><span id="hudAlt">—</span></div>
+      <div class="hud-row"><label>SPEED</label><span id="hudVel">—</span></div>
+      <div class="hud-row"><label>APSIS (OSC)</label><span id="hudApsis">—</span></div>
+      <div class="hud-row"><label>TARGET</label><span id="hudTgt">—</span></div>
+      <div class="hud-row"><label>TOTAL Δv</label><span id="hudDv">—</span></div>
+      <div class="hud-row dim" id="hudFrame">—</div>
+    </div>
+
+    <div id="dispOpts">
+      <label><input type="checkbox" id="optOrbits" /> orbits</label>
+      <label><input type="checkbox" id="optLabels" /> labels</label>
+      <label><input type="checkbox" id="optSoi" /> SOI</label>
+      <label><input type="checkbox" id="optGrid" /> grid</label>
+      <label><input type="checkbox" id="optEvents" /> events</label>
+      <label title="Show the live osculating orbit with apoapsis and periapsis markers"><input type="checkbox" id="optApsides" /> apsides</label>
+      <label><input type="checkbox" id="optEvLabels" /> event labels</label>
+      <label><input type="checkbox" id="optTex" /> textures</label>
+      <label title="Render everything fully lit — no night side or shading"><input type="checkbox" id="optFlat" /> full bright</label>
+      <label><input type="checkbox" id="optMinor" title="Dwarf planets & asteroids" /> minor bodies</label>
+    </div>
+  </section>
+
+  <!-- ===================== right: tabs =============================== -->
+  <aside id="right">
+    <div id="tabs">
+      <button class="tabbtn active" data-pane="scriptPane">Script</button>
+      <button class="tabbtn" data-pane="guidePane">Guide</button>
+      <button class="tabbtn" data-pane="exportPane">Export</button>
+    </div>
+
+    <div id="scriptPane" class="tabpane active">
+      <div class="pane-tools">
+        <span class="hint">GMAT-style mission sequence (generated)</span>
+        <button id="btnCopyScript">Copy</button>
+      </div>
+      <pre id="scriptPre"></pre>
+    </div>
+
+    <div id="guidePane" class="tabpane"></div>
+
+    <div id="exportPane" class="tabpane">
+      <h3>Snapshot</h3>
+      <p class="hint">Saves the current 3D view as an image.</p>
+      <button id="btnPng" class="wide">⬇ Export PNG snapshot</button>
+
+      <h3>Animated GIF</h3>
+      <p class="hint">Renders the whole mission (launch → end) from the current camera
+      into a looping GIF, encoded in-browser (GIF89a, LZW).</p>
+      <div class="fgrid">
+        <label>Width (px)</label>
+        <select id="gifW">
+          <option value="480">480</option>
+          <option value="640" selected>640</option>
+          <option value="800">800</option>
+        </select>
+        <label>Frame rate</label>
+        <select id="gifFps">
+          <option value="10">10 fps</option>
+          <option value="12" selected>12 fps</option>
+          <option value="15">15 fps</option>
+        </select>
+        <label>Duration (s)</label>
+        <select id="gifDur">
+          <option value="5">5</option>
+          <option value="8" selected>8</option>
+          <option value="12">12</option>
+        </select>
+      </div>
+      <button id="btnGif" class="wide">⬇ Export mission GIF</button>
+
+      <h3>Mission plan (JSON)</h3>
+      <button id="btnJsonExport" class="wide">⬇ Export mission JSON</button>
+      <label class="filebtn wide">⬆ Import mission JSON
+        <input type="file" id="jsonImportFile" accept=".json,application/json" />
+      </label>
+
+      <h3>Body catalog</h3>
+      <p class="hint">Extend the solar system with your own bodies (asteroids, comets,
+      extra moons) — format documented in the Guide tab.</p>
+      <label class="filebtn wide">⬆ Import body catalog JSON
+        <input type="file" id="catImportFile" accept=".json,application/json" />
+      </label>
+
+      <h3>Planet textures</h3>
+      <p class="hint">Run <code>get_textures.ps1</code> in the project folder once
+      (right-click → Run with PowerShell) to download NASA-imagery planet maps and
+      enable textured globes. Details in the Guide tab.</p>
+    </div>
+  </aside>
+</main>
+
+<!-- ========================= transport bar =========================== -->
+<footer id="transport">
+  <button id="btnReset" title="Back to T+0">⏮</button>
+  <button id="btnPlay" title="Play / pause (Space)">▶</button>
+  <select id="speedSel" title="Simulation speed"></select>
+  <div id="scrubwrap">
+    <div id="ticks"></div>
+    <input type="range" id="scrub" min="0" max="1" step="any" value="0" />
+  </div>
+</footer>
+
+<!-- GIF progress modal -->
+<div id="gifModal">
+  <div class="modal-box">
+    <div class="modal-title">Exporting GIF</div>
+    <div class="progress"><div id="gifBar"></div></div>
+    <div id="gifLbl" class="hint">Preparing…</div>
+    <button id="gifCancel">Cancel</button>
+  </div>
+</div>
+
+<script src="js/constants.js"></script>
+<script src="js/kepler.js"></script>
+<script src="js/targeting.js"></script>
+<script src="js/ode.js"></script>
+<script src="js/cr3bp.js"></script>
+<script src="js/libration.js"></script>
+<script src="js/windows.js"></script>
+<script src="js/analysis.js"></script>
+<script src="js/environment-models.js"></script>
+<script src="js/ephemeris-table.js"></script>
+<script src="js/planner-ephemeris-data.js"></script>
+<script src="js/planner-ephemeris.js"></script>
+<script src="js/force-models.js"></script>
+<script src="js/sgp4.js"></script>
+<script src="js/uncertainty.js"></script>
+<script src="js/multicraft.js"></script>
+<script src="js/propagator.js"></script>
+<script src="js/missions.js"></script>
+<script src="js/gifenc.js"></script>
+<script src="js/scriptgen.js"></script>
+<!-- optional: generated by get_textures.ps1 (NASA-imagery planet maps).
+     A 404 here is harmless — the renderer falls back to gradient bodies. -->
+<script src="js/textures-data.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/offline.js"></script>
+</body>
+</html>
