@@ -1266,7 +1266,11 @@
     const vehicleResult = activeVehicleResult();
     if (!S.gtOpen || !vehicleResult || !globalThis.MTPGroundTrack) return;
     const cv2 = $("gtCv");
-    if (!cv2 || now - gtLastDraw < 80) return;
+    // The map is an analysis overlay, not the animation clock. During
+    // playback a five-Hz update remains readable while avoiding a second
+    // texture/map pass competing with every main-canvas frame.
+    const interval = S.playing ? 200 : 80;
+    if (!cv2 || now - gtLastDraw < interval) return;
     gtLastDraw = now;
     const obsT = activeObserve();
     const bodyId = obsT || gtBody();
@@ -4531,14 +4535,28 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
   /* ------------------------------ canvas ------------------------------- */
   const cv = $("cv");
   const g = cv.getContext("2d");
-  const renderDpr = () => Math.min(window.devicePixelRatio || 1, 2);
-  function resize() {
+  const PLAYBACK_DPR_CAP = 1.5;
+  let canvasDpr = 0;
+  const renderDpr = () => Math.min(window.devicePixelRatio || 1,
+    S.playing ? PLAYBACK_DPR_CAP : 2);
+  function resizeMainCanvas(force) {
     const box = $("viz").getBoundingClientRect();
     const dpr = renderDpr();
-    cv.width = Math.round(box.width * dpr);
-    cv.height = Math.round(box.height * dpr);
+    const width = Math.round(box.width * dpr);
+    const height = Math.round(box.height * dpr);
+    if (force || cv.width !== width || cv.height !== height) {
+      cv.width = width;
+      cv.height = height;
+    }
     cv.style.width = box.width + "px";
     cv.style.height = box.height + "px";
+    canvasDpr = dpr;
+  }
+  function syncRenderResolution() {
+    if (Math.abs(renderDpr() - canvasDpr) > 0.01) resizeMainCanvas(false);
+  }
+  function resize() {
+    resizeMainCanvas(true);
     resizeWindowCanvas();
     resizeAnalysisCanvases();
   }
@@ -4633,6 +4651,9 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     povTick();
     syncVirtualFocus();
     gtTick(now);
+    // Dynamic playback resolution cuts high-DPI fill work by up to 44%, then
+    // restores the full 2x paused drawing immediately when playback stops.
+    syncRenderResolution();
     // A settled scene and accelerated Auto Time do not need native-refresh
     // full-canvas paints. Time pacing, event guards, and camera easing above
     // still run at every requestAnimationFrame callback.
@@ -4644,7 +4665,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       requestAnimationFrame(frame); return;
     }
     lastPaint = now;
-    const dpr = renderDpr();
+    const dpr = canvasDpr || renderDpr();
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     S.pickOut = {};
     globalThis.MTPRender.draw(g, cv.width / dpr, cv.height / dpr, makeScene(S.tNow, S.pickOut));
@@ -5028,6 +5049,25 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
   /* trimmed auto-camera for offline (GIF) rendering — same shot rules */
   function gifAutoCamStep(cam2, result, t, dtF, smp, gshot) {
     const jd = result.epochJD + t / DAY;
+    if (smp.cr3bp && globalThis.CR3BP) {
+      const system = globalThis.CR3BP.getSystem(smp.cr3bpSystem);
+      const orbit = result.cr3bpOrbit;
+      let extent = system.distanceKm * 0.04;
+      if (orbit && orbit.states && orbit.states.length) {
+        const equilibrium = globalThis.CR3BP.equilibriumPoint(system, orbit.point).position;
+        extent = orbit.states.reduce((largest, state) => Math.max(largest,
+          V.mag(V.sub(state.slice(0, 3), equilibrium)) * system.distanceKm), extent);
+      }
+      cam2.focusMode = "ship";
+      cam2.focusBody = system.secondaryId;
+      cam2.freeFocus = null;
+      cam2.pan = [0, 0, 0];
+      const distance = Math.max(extent * 5.5, BODIES[system.secondaryId].radius * 8);
+      const blend = 1 - Math.exp(-dtF / 1.15);
+      cam2.dist = Math.exp(Math.log(cam2.dist) +
+        (Math.log(distance) - Math.log(cam2.dist)) * blend);
+      return;
+    }
     const cen = BODIES[smp.cen];
     const T = S.camEvT || [];
     let lo = 0, hi = T.length;
@@ -5081,7 +5121,20 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     cam2.dist = Math.exp(Math.log(cam2.dist) + (Math.log(dist) - Math.log(cam2.dist)) * k);
   }
 
+  function gifReferenceFrame(camMode, selectedFrame, sample) {
+    if (!sample) return selectedFrame;
+    // Current/Auto/Ship keep the Planner's selected reference frame just as
+    // ordinary playback does. Corrected CR3BP camera modes opt into the
+    // matching rotating frame, while onboard POV alone needs the local
+    // central-body frame used to orient its look vector.
+    if ((camMode === "auto" || camMode === "ship") && sample.cr3bp &&
+        sample.cr3bpSystem) return "synodic:" + sample.cr3bpSystem;
+    if (camMode === "pov") return sample.cen === "sun" ? "inertial" : sample.cen;
+    return selectedFrame;
+  }
+
   async function exportGif() {
+    if (S.exporting) return;
     const exportResult = activeVehicleResult();
     const exportSpacecraft = activeSpacecraft();
     if (!exportResult || !exportResult.samples || !exportResult.samples.length) {
@@ -5114,6 +5167,8 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     cam2.pan = [0, 0, 0];
     cam2.freeFocus = S.camera.freeFocus ? V.clone(S.camera.freeFocus) : null;
     const gshot = { mode: "", sinceT: 0, cen: "" };
+    const selectedFrame = S.frameBody;
+    const resumePlayback = !!S.playing;
     const scFov = Math.min(140, Math.max(15,
       (exportSpacecraft && +exportSpacecraft.fovDeg) || 50)) * Math.PI / 180;
     if (camMode !== "pov" && camMode !== "current") cam2.fov = 50 * Math.PI / 180;
@@ -5135,8 +5190,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
         if (S.gifCancel) throw new Error("cancelled");
         const t = times[i];
         const smp = ME.sampleAtTime(exportResult, t);
-        let frameB = S.frameBody;
-        if (smp && camMode !== "current") frameB = smp.cen === "sun" ? "inertial" : smp.cen;
+        const frameB = gifReferenceFrame(camMode, selectedFrame, smp);
         if (camMode === "current" && S.virtualFocus && cam2.focusMode === "free" &&
             globalThis.MTPRender.librationPointWorld) {
           const markerWorld = globalThis.MTPRender.librationPointWorld(
@@ -5203,6 +5257,8 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       if (err.message !== "cancelled") banner("GIF export failed: " + err.message, true);
     } finally {
       S.exporting = false;
+      S.playing = resumePlayback && S.tNow < resultTimeBounds(exportResult).end;
+      updatePlayBtn();
       modal.classList.remove("show");
       globalThis.MTPRender.invalidateCache();
     }

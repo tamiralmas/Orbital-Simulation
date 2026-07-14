@@ -2,9 +2,9 @@
  * Mission Trajectory Planner — textures.js
  * Textured-sphere rendering for catalog bodies.
  *
- * Texture data is optional: run get_textures.ps1 (project root) once to
- * download NASA-imagery-based equirectangular maps (Solar System Scope pack,
- * CC-BY 4.0) and pack them into js/textures-data.js as base64 data URIs.
+ * Texture data is optional: open get_textures.html to refresh the
+ * NASA-imagery-based equirectangular maps and pack them into
+ * js/textures-data.js as base64 data URIs.
  * Keeping the pixels inline avoids canvas tainting, so PNG/GIF export keeps
  * working even when index.html is opened straight from disk.
  *

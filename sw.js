@@ -2,10 +2,10 @@
 "use strict";
 
 const CACHE_PREFIX = "mtp-offline-";
-const CACHE_NAME = CACHE_PREFIX + "1.19.4-r1";
+const CACHE_NAME = CACHE_PREFIX + "1.19.5-r1";
 
 const CORE_ASSETS = [
-  "./", "./index.html", "./classic.html", "./live.html", "./deep.html",
+  "./", "./index.html", "./classic.html", "./live.html", "./deep.html", "./favicon.png",
   "./schema.html", "./css/theme.css", "./css/style.css",
   "./js/constants.js", "./js/kepler.js", "./js/targeting.js", "./js/ode.js",
   "./js/cr3bp.js", "./js/libration.js", "./js/windows.js", "./js/analysis.js",

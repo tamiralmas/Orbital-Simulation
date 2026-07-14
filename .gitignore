@@ -5,3 +5,11 @@
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Local development and agent material (not part of the public release)
+/tests/
+/AGENTS.md
+/HANDOFF.md
+/plan.md
+*.ps1
+*.bat

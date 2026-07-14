@@ -101,8 +101,15 @@
 
 #titleBlock { display: none; }
 
-#tabs { display: flex; flex: 0 0 auto; }
-.tabbtn { flex: 1; border: none; background: transparent; padding: 11px 0; color: var(--dim); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+#tabs {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); flex: 0 0 auto;
+}
+.tabbtn {
+  width: 100%; min-width: 0; overflow: hidden;
+  border: none; background: transparent; padding: 11px 3px;
+  color: var(--dim); font-size: 9.5px; letter-spacing: .35px;
+  text-transform: uppercase;
+}
 .tabpane { display: none; padding: 12px 14px; overflow-y: auto; flex: 1; min-height: 0; }
 .tabpane.active { display: block; }
 .pane-tools { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -534,7 +541,9 @@ label.filebtn input { display: none; }
 [data-theme="blueprint"] #left { grid-column: 1; background: var(--panel); border-right: 1px solid var(--line); padding: 0; }
 [data-theme="blueprint"] #viz { grid-column: 2; }
 [data-theme="blueprint"] #right { grid-column: 3; background: var(--panel); border-left: 1px solid var(--line); }
-[data-theme="blueprint"] #tabs .tabbtn { flex: 1 1 0; min-width: 0; padding-inline: 8px; }
+[data-theme="blueprint"] #tabs .tabbtn {
+  padding-inline: 3px; font-family: var(--mono); font-size: 9px; letter-spacing: .35px;
+}
 
 [data-theme="blueprint"] .panel-title { padding: 16px 16px 0; font-size: 10px; color: var(--faint); flex-wrap: wrap; gap: 2px 10px; }
 [data-theme="blueprint"] #planDv { color: var(--accent); white-space: nowrap; }
@@ -905,7 +914,10 @@ label.filebtn input { display: none; }
 }
 [data-theme="cinematic"] #right.open { display: flex; }
 [data-theme="cinematic"] #tabs { border-bottom: 1px solid var(--line); padding: 6px 8px 0; gap: 2px; }
-[data-theme="cinematic"] .tabbtn { flex: 1 1 0; min-width: 0; border-radius: 10px 10px 0 0; background: transparent; border: none; padding: 10px 8px; font-size: 10.5px; }
+[data-theme="cinematic"] .tabbtn {
+  border-radius: 10px 10px 0 0; background: transparent; border: none;
+  padding: 10px 3px; font-size: 9.5px; letter-spacing: .2px;
+}
 [data-theme="cinematic"] .tabbtn.active { color: #ff9d7c; box-shadow: inset 0 -2px 0 var(--accent); }
 [data-theme="cinematic"] label.filebtn { background: var(--panel2); border: 1px solid var(--line); border-radius: 999px; color: var(--dim); }
 [data-theme="cinematic"] label.filebtn:hover { border-color: var(--accent); color: #fff; }

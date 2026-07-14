@@ -112,14 +112,9 @@ Direct `file://` operation remains supported, including the Planner and
 embedded assets.
 
 For the most consistent browser behavior, network-backed Live data, and the
-optional service-worker cache, use the included local server on Windows:
-
-1. Double-click `start.bat`; or
-2. Run `powershell -ExecutionPolicy Bypass -File serve.ps1`.
-
-The site opens at `http://localhost:5555/`. `serve.ps1` also accepts `-Port`
-and `-NoOpen`. It installs nothing and sends no-cache headers for local
-development.
+optional service-worker cache, serve the folder with any static HTTP server or
+publish it with GitHub Pages. No application server, package installation, or
+build step is required.
 
 Open `live.html` for the combined tracker and switch between Earth 100 and
 Deep 100 without leaving the page. `deep.html` remains a compatibility redirect
@@ -141,10 +136,8 @@ to `live.html#deep`.
 
 The repository's textures are real agency-derived imagery, not procedural
 substitutes. To regenerate them, open `get_textures.html`, fetch the sources,
-and save the result over the generated `js/textures-data.js`. On Windows,
-`get_textures.ps1 -EarthMoonOnly -Refresh` refreshes the official 2048x1024
-NASA Blue Marble Earth and NASA Moon Trek LRO WAC Moon maps while preserving
-the other embedded textures. Never hand-edit `js/textures-data.js`.
+and save the result over the generated `js/textures-data.js`. Never hand-edit
+`js/textures-data.js`.
 
 Textures are embedded as data URIs, so PNG/GIF canvas export continues to work
 without CORS tainting from `file://`.
@@ -226,13 +219,11 @@ single-vehicle mission files remain compatible.
     js/live.js                    Earth 100 SGP4/SDP4 controller
     js/deep.js                    Deep 100 bounded-vector controller
     sw.js, js/offline.js          optional HTTP(S) offline cache
-    serve.ps1, start.bat          zero-install local HTTP server
-    tests/                        headless engine, UI, and data regressions
+    favicon.png                   Blueprint-style browser tab icon
 
-Generated assets are reproducible: `get_planner_ephemerides.ps1` creates the
-Planner table; `get_deep_ephemerides.ps1` and `get_deep_archives.ps1` create
-the bounded Deep release assets; and `get_textures.html` creates embedded
-agency textures.
+The release includes bounded generated ephemeris archives and embedded agency
+textures. Open `get_textures.html` when the texture sources need to be reviewed
+or refreshed.
 
 ## Accuracy and model boundaries
 
@@ -286,16 +277,13 @@ agency textures.
   flyby turn angle, launch geometry, frame composition, GP reference vectors,
   force terms, uncertainty bounds, operations UI, native vehicle contracts,
   and all 27 presets are
-  guarded by headless regression tests. Run the complete suite with:
-
-      node tests/run_tests.js
-
-  The required release result is 27/27 presets with zero warnings.
+  guarded by the project's internal headless regression suite. The required
+  release result is 27/27 presets with zero warnings.
 
 ## Roadmap status
 
-The bounded implementation described in [plan.md](plan.md) is complete through
-v1.19: design windows and targeting, analysis/reporting, access and sensors,
+The bounded v1.19 implementation is complete: design windows and targeting,
+analysis/reporting, access and sensors,
 native and comparison multi-craft workflows, rendezvous/docking, adaptive
 force models, finite burns,
 atmosphere/drag, SRP/eclipse, J2-J4, SGP4/SDP4, a generated Horizons table,
