@@ -3,7 +3,7 @@
   "$id": "https://mission-trajectory-planner.invalid/schema/mission.schema.json",
   "title": "Mission Trajectory Planner mission",
   "description": "Portable mission definition consumed by the buildless Mission Trajectory Planner.",
-  "x-mtp-version": "1.24.0",
+  "x-mtp-version": "1.24.1",
   "type": "object",
   "additionalProperties": true,
   "required": [

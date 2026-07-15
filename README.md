@@ -96,6 +96,7 @@ languages for the combined Earth 100 and Deep 100 tracker.
   Europa Clipper MEGA, and early Parker Solar Probe
   reconstructions; ideal CR3BP and finite-burn demonstrations; five focused
   v1.18 validation missions; and ten v1.19 operations/multi-vehicle scenarios.
+  Artemis II is the default first-load mission.
 - Combines Earth 100 and Deep 100 in one Mission Tracker. Earth 100 consumes
   public CelesTrak OMM data and uses SGP4/SDP4, with a clearly labelled
   first-order J2 fallback only for unusable records. Deep 100 has exactly 100

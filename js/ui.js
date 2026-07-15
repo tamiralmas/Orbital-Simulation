@@ -5680,9 +5680,9 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
   initWindowPlanner();
   buildGuide();
   resize();
-  loadPreset("apollo11");
+  loadPreset("artemis2");
   initAnalysisUI();
-  $("presetSel").value = "apollo11";
+  $("presetSel").value = "artemis2";
   $("btnAuto").classList.toggle("active", S.autoCam);
   requestAnimationFrame((t) => { last = t; requestAnimationFrame(frame); });
 })();

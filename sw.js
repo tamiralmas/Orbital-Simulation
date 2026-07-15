@@ -2,7 +2,7 @@
 "use strict";
 
 const CACHE_PREFIX = "mtp-offline-";
-const CACHE_NAME = CACHE_PREFIX + "1.24.0-r2";
+const CACHE_NAME = CACHE_PREFIX + "1.24.1-r1";
 
 const CORE_ASSETS = [
   "./", "./index.html", "./classic.html", "./live.html", "./deep.html", "./favicon.png",
