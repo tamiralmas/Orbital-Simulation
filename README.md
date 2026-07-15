@@ -91,7 +91,9 @@ languages for the combined Earth 100 and Deep 100 tracker.
   bound is a conservative first-order estimated-95% upper bound; event times
   remain nominal, comparison-craft covariance is not modeled, and no
   probabilistic interval is claimed.
-- Ships 27 preset missions, including date-pinned Apollo, Cassini, and Voyager
+- Ships 30 preset missions in a grouped catalog, including the completed,
+  date-pinned Artemis II crewed lunar flyby plus Apollo, Cassini, Voyager,
+  Europa Clipper MEGA, and early Parker Solar Probe
   reconstructions; ideal CR3BP and finite-burn demonstrations; five focused
   v1.18 validation missions; and ten v1.19 operations/multi-vehicle scenarios.
 - Combines Earth 100 and Deep 100 in one Mission Tracker. Earth 100 consumes
@@ -104,6 +106,9 @@ languages for the combined Earth 100 and Deep 100 tracker.
 - Provides free, top-down, auto, focus, and onboard POV cameras; exact physical
   planet occultation; a clustered event timeline; adaptive Auto Time; agency
   textures; PNG/GIF export; mission JSON; and GMAT-style script export.
+- Keeps the Cinematic flight HUD compact by default: Segment, Altitude/Range,
+  Speed, and Total delta-v remain visible, and a persisted Details control reveals the full
+  osculating-apsis and engine readouts without deleting telemetry.
 
 ## Quick start
 
@@ -119,6 +124,24 @@ build step is required.
 Open `live.html` for the combined tracker and switch between Earth 100 and
 Deep 100 without leaving the page. `deep.html` remains a compatibility redirect
 to `live.html#deep`.
+
+On phones and tablets, the Planner opens with the Plan and Data sheets closed
+so the trajectory canvas remains usable. Drag one finger to orbit the camera;
+pinch to zoom and move the two-finger midpoint to pan. The edge buttons open
+one sheet at a time. Blueprint keeps its technical-drawing controls, while
+Cinematic keeps its dark glass controls and compact floating transport.
+
+The `ENGINE / THRUST` readout and attached canvas vector distinguish two
+models: `ON` means an integrated finite-thrust segment is actively propagating,
+while `IMPULSE PREVIEW` shows the direction of a solved instantaneous delta-v.
+Named-site launches now use an editable, realistically timed guided-ascent
+display with a vertical rise and smooth gravity turn to the exact solved MECO
+state. The Planner labels this inverse-dynamics model instead of inventing a
+vehicle-specific thrust or aerodynamic history; the isolated game prototype is
+the forward-simulated place to test throttle, staging, mass flow, and drag.
+In Data, `Station Access` finds line-of-sight passes for the selected local
+orbital leg above DSN or user-station elevation masks and reports rise, set,
+duration, and maximum elevation with CSV export.
 
 ### Offline behavior
 
@@ -211,7 +234,7 @@ single-vehicle mission files remain compatible.
     js/analysis.js                elements, eclipse, access, swath, J2
     js/multicraft.js              synchronized multi-craft analysis
     js/propagator.js              mission engine and 23 segment executors
-    js/missions.js                27 presets
+    js/missions.js                30 categorized presets
     js/renderer.js                painter-sorted, occultation-safe 3D canvas
     js/groundtrack.js             body-fixed equirectangular Track panel
     js/ui.js                      Planner state, UI, camera, playback, exports
@@ -276,9 +299,9 @@ or refreshed.
 - Patched-conic handoffs, renderer occultation, finite-burn integration,
   flyby turn angle, launch geometry, frame composition, GP reference vectors,
   force terms, uncertainty bounds, operations UI, native vehicle contracts,
-  and all 27 presets are
+  and all 30 presets are
   guarded by the project's internal headless regression suite. The required
-  release result is 27/27 presets with zero warnings.
+  release result is 30/30 presets with zero warnings.
 
 ## Roadmap status
 

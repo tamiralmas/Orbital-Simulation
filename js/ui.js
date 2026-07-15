@@ -175,6 +175,13 @@
     }
     S.obsWindows = Array.from(observeBySegment.values()).filter((window) =>
       window.end > window.start);
+    S.handoffWindows = events.filter((event) => event._burn &&
+      event._burn.continuousSoi && Number.isFinite(event._burn.exitT) &&
+      event._burn.exitT > event.t).map((event) => ({
+        start: event.t,
+        end: event._burn.exitT,
+        body: event._burn.cen,
+      }));
     S.camEvT = events.filter((event) =>
       isAutoEvent(event, AUTOCAM_SHOT_EVENTS)).map((event) => event.t);
   }
@@ -3079,6 +3086,14 @@
     }
     return Infinity;
   }
+  function handoffRateCap(tAt) {
+    for (const window of S.handoffWindows || []) {
+      if (tAt >= window.start && tAt <= window.end)
+        return Math.max(AUTO_EVENT_PROFILES.handoff.minRate,
+          (window.end - window.start) / 12);
+    }
+    return Infinity;
+  }
   function autoRate(tAt, resultOverride) {
     const tRef = tAt === undefined ? S.tNow : tAt;
     const T = S.evT || [];
@@ -3107,7 +3122,8 @@
       : Infinity;
     const rNext = ramp(next - tRef, nextProfile,
       lo < T.length && W[lo] !== undefined ? W[lo] : nextProfile.windowS);
-    return Math.min(rPrev, rNext, cruise, observationRateCap(tRef));
+    return Math.min(rPrev, rNext, cruise, observationRateCap(tRef),
+      handoffRateCap(tRef));
   }
   let lastRate = 21600;
   let rateSmooth = null;
@@ -3171,6 +3187,7 @@
       camera._autoFitKey = key;
       camera._autoFitDist = desired;
       camera._autoFitFresh = true;
+      camera._autoFitTransition = true;
     } else if (desired > camera._autoFitDist * 1.12) {
       // Open the view promptly as the framed pair grows, retaining margin.
       camera._autoFitDist = desired * 1.03;
@@ -3195,23 +3212,48 @@
     camera.freeFocus = midpointDisplay;
     camera.pan = [0, 0, 0];
     const span = body.radius + 0.5 * Math.max(range, extent || range);
-    const desired = Math.max(span * 1.22 / Math.tan(camera.fov / 2), body.radius * 3.2);
+    // Retain enough composition margin for the distance ease to catch a
+    // receding spacecraft without needing a one-frame zoom correction.
+    const desired = Math.max(span * 1.25 / Math.tan(camera.fov / 2), body.radius * 3.2);
     return stableAutoDistance(camera, key || ("pair:" + body.id + ":" + frameBody), desired);
   }
-  function easeAutoDistance(camera, target, dt) {
-    if (camera._autoFitFresh) {
-      camera.dist = target;
+  function easeAutoDistance(camera, target, dt, allowInitialSnap) {
+    const freshTransition = !!camera._autoFitFresh;
+    const acquiringShot = !!camera._autoFitTransition;
+    if (freshTransition) {
       camera._autoFitFresh = false;
-      return;
+      // Establish a paused mission or the first GIF frame immediately. During
+      // playback, a frame/subject change must still pass through the bounded
+      // easing below or the view visibly pops.
+      if (allowInitialSnap) {
+        camera.dist = target;
+        camera._autoFitTransition = false;
+        return;
+      }
     }
-    if (!isFinite(camera.dist) || camera.dist <= 0) camera.dist = target;
-    // Make space quickly enough to retain the ship; close much more slowly.
-    // The 92% safety floor consumes only the fit margin, not the subject.
-    if (target > camera.dist) camera.dist = Math.max(camera.dist, target * 0.92);
-    const tau = target > camera.dist ? 0.75 : 2.6;
-    const blend = 1 - Math.exp(-Math.max(dt || 0, 0) / tau);
-    camera.dist = Math.exp(Math.log(camera.dist) +
-      (Math.log(Math.max(target, 1)) - Math.log(camera.dist)) * blend);
+    if (!isFinite(camera.dist) || camera.dist <= 0) {
+      camera.dist = target;
+      camera._autoFitTransition = false;
+    }
+    const dtSafe = Math.min(Math.max(dt || 0, 0), 0.05);
+    if (!dtSafe) return;
+    const opening = target > camera.dist;
+    // A subject/frame key change can cross several orders of magnitude (for
+    // example heliocentric cruise into a Mars flyby). Converge that new shot
+    // in under a second without snapping. Ordinary within-shot closing keeps
+    // the older, calmer cadence so cruise framing does not pump.
+    const tau = acquiringShot ? 0.12 : opening ? 0.22 : 2.6;
+    const blend = 1 - Math.exp(-dtSafe / tau);
+    const requestedLogStep = Math.log(Math.max(target, 1) / camera.dist) * blend;
+    // Bound scale change per real second as well as filtering it. Opening can
+    // remain responsive enough to retain the ship; closing is deliberately
+    // slower so long cruise arcs do not make the camera breathe.
+    const maxLogRate = acquiringShot ? 8.0 : opening ? 4.0 : 0.45;
+    const maxLogStep = maxLogRate * dtSafe;
+    const logStep = Math.max(-maxLogStep, Math.min(maxLogStep, requestedLogStep));
+    camera.dist *= Math.exp(logStep);
+    if (Math.abs(Math.log(Math.max(target, 1) / camera.dist)) < 0.03)
+      camera._autoFitTransition = false;
   }
   function resetAutoCamera(hard) {
     shot = { mode: "", since: 0, cen: "" };
@@ -3221,6 +3263,7 @@
       delete S.camera._autoFitKey;
       delete S.camera._autoFitDist;
       delete S.camera._autoFitFresh;
+      delete S.camera._autoFitTransition;
     }
   }
   function autoCamTick(dtReal) {
@@ -3245,7 +3288,7 @@
       cam.pan = [0, 0, 0];
       const targetDist = stableAutoDistance(cam, "cr3bp:" + system.id,
         Math.max(extent * 5.5, BODIES[system.secondaryId].radius * 8));
-      easeAutoDistance(cam, targetDist, dtReal);
+      easeAutoDistance(cam, targetDist, dtReal, !S.playing);
       const wantFrame = "synodic:" + system.id;
       if (S.frameBody !== wantFrame) {
         S.frameBody = wantFrame;
@@ -3320,7 +3363,7 @@
       dist = autoPairDistance(cam, displaySmp.w, "sun", jd, wantFrame, range);
     }
 
-    easeAutoDistance(cam, dist, dtReal);
+    easeAutoDistance(cam, dist, dtReal, !S.playing);
 
     if (S.frameBody !== wantFrame) {
       S.frameBody = wantFrame;
@@ -3416,6 +3459,19 @@
     }
     host.innerHTML = rows.length ? rows.join("") : "No simultaneous secondary state.";
   }
+  function updateBurnNotice(preview) {
+    const notice = $("burnNotice");
+    if (!notice) return;
+    const content = preview && globalThis.MTPRender &&
+      globalThis.MTPRender.burnPreviewNotice
+      ? globalThis.MTPRender.burnPreviewNotice(preview) : null;
+    notice.classList.toggle("show", !!content);
+    notice.setAttribute("aria-hidden", content ? "false" : "true");
+    if (!content) return;
+    setText("burnNoticeTitle", content.primary);
+    setText("burnNoticeDetail", content.secondary);
+  }
+
   function updateHud() {
     const smp = currentSample();
     const jd = S.result.epochJD + S.tNow / DAY;
@@ -3424,12 +3480,14 @@
     setText("hudMet", fmtMet(S.tNow));
     setText("hudDate", A.jdToStr(jd));
     setText("hudVehicle", vehicle ? vehicle.name || vehicle.id : "--");
-    setText("cineMeta", `${S.mission.name || "Mission"} / ` +
-      `${vehicle ? vehicle.name || vehicle.id : "vehicle"}`);
     updateFormationReadout(smp);
     if (!smp) {
+      updateBurnNotice(null);
       for (const id of ["hudSeg", "hudCentral", "hudAlt", "hudVel", "hudApsis", "hudTgt"])
         setText(id, "—");
+      const engineEl = setText("hudEngine", "OFF");
+      if (engineEl && engineEl.closest(".hud-cell"))
+        engineEl.closest(".hud-cell").classList.remove("active");
       setText("hudDv", (vehicleResult ? vehicleResult.totalDv : 0).toFixed(2) + " km/s" +
         (S.result.vehicleOrder && S.result.vehicleOrder.length > 1
           ? ` / SUM ${S.result.totalDv.toFixed(2)}` : ""));
@@ -3448,16 +3506,34 @@
       ? globalThis.CR3BP.getSystem(smp.cr3bpSystem) : null;
     setText("hudCentral", cr3bpSystem ? cr3bpSystem.name + " CR3BP" : cenB.name);
     const rm = V.mag(smp.r);
-    setText("hudAlt", smp.cen === "sun" ? fmtDist(rm) : fmtDist(rm - cenB.radius) +
+    const altEl = setText("hudAlt", smp.cen === "sun" ? fmtDist(rm) : fmtDist(rm - cenB.radius) +
       (smp.landed ? " (surface)" : ""));
     setText("hudVel", smp.landed ? "0 (landed)" : V.mag(smp.v).toFixed(3) + " km/s");
     const apsisPreview = globalThis.MTPRender && globalThis.MTPRender.burnPreviewState
       ? globalThis.MTPRender.burnPreviewState(vehicleResult, S.tNow, smp) : null;
-    setText("hudApsis", seg && seg.type === "launch" && smp.t < seg._t1 - 1e-6
+    updateBurnNotice(apsisPreview);
+    const apsisValue = seg && seg.type === "launch" && smp.t < seg._t1 - 1e-6
       ? "POWERED ASCENT · MECO TARGET"
       : (apsisPreview && apsisPreview.apoOpen
         ? "AP OPEN · PE —"
-        : apsisText(apsisPreview ? apsisPreview.state : smp)));
+        : apsisText(apsisPreview ? apsisPreview.state : smp));
+    setText("hudApsis", apsisValue);
+    if (altEl) altEl.title = "Osculating apsis: " + apsisValue;
+    const thrustCue = globalThis.MTPRender && globalThis.MTPRender.thrustCueState
+      ? globalThis.MTPRender.thrustCueState(vehicleResult, S.tNow, smp) : null;
+    const engineEl = setText("hudEngine", thrustCue ? thrustCue.label : "OFF");
+    if (engineEl) {
+      const engineCell = engineEl.closest(".hud-cell");
+      if (engineCell) {
+        engineCell.classList.toggle("active", !!(thrustCue && thrustCue.active));
+        engineCell.title = thrustCue ? thrustCue.label : "Engine off";
+      }
+      engineEl.title = thrustCue && thrustCue.impulse
+        ? "Impulse burns are instantaneous; this previews the solved delta-v direction."
+        : thrustCue && thrustCue.engineOn
+          ? "Finite-thrust propagation is active in the shown acceleration direction."
+          : "No active or previewed burn.";
+    }
     const targetVehicleId = seg && (seg._targetVehicle || seg.targetVehicle || seg.fromVehicle);
     const targetVehicleResult = targetVehicleId && S.result.vehicleResults &&
       S.result.vehicleResults[targetVehicleId];
@@ -4747,12 +4823,63 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
 
   /* camera input */
   let drag = null;
+  let pinch = null;
+  const touchPointers = new Map();
+  function clampCameraDistance() {
+    const focusBody = S.camera.focusMode === "body" ? S.camera.focusBody : null;
+    const minDistance = focusBody && BODIES[focusBody]
+      ? BODIES[focusBody].radius * 1.12 : 3;
+    S.camera.dist = Math.min(Math.max(S.camera.dist, minDistance), 4e10);
+  }
+  function panCameraByPixels(dx, dy) {
+    const basis = S.pickOut.basis;
+    if (!basis) return;
+    const scale = S.camera.dist / basis.f;
+    S.camera.pan = V.add(S.camera.pan, V.add(
+      V.scale(basis.Rt, -dx * scale), V.scale(basis.Up, dy * scale)));
+  }
+  function currentPinch() {
+    const points = Array.from(touchPointers.values()).slice(0, 2);
+    if (points.length < 2) return null;
+    return {
+      distance: Math.max(1, Math.hypot(points[1].x - points[0].x,
+        points[1].y - points[0].y)),
+      x: (points[0].x + points[1].x) / 2,
+      y: (points[0].y + points[1].y) / 2,
+    };
+  }
   cv.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") {
+      touchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchPointers.size > 1) {
+        pinch = currentPinch();
+        drag = null;
+        setAutoCam(false); setPov(false); cancelTopView();
+      }
+    }
+    if (e.pointerType === "touch" && touchPointers.size > 1) {
+      cv.setPointerCapture(e.pointerId);
+      return;
+    }
     drag = { x: e.clientX, y: e.clientY, moved: 0, btn: e.button,
-             pan: e.button === 2 || e.shiftKey || e.button === 1 };
+             pan: e.pointerType !== "touch" &&
+               (e.button === 2 || e.shiftKey || e.button === 1) };
     cv.setPointerCapture(e.pointerId);
   });
   cv.addEventListener("pointermove", (e) => {
+    if (e.pointerType === "touch" && touchPointers.has(e.pointerId)) {
+      touchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchPointers.size > 1) {
+        const next = currentPinch();
+        if (next && pinch) {
+          S.camera.dist *= pinch.distance / next.distance;
+          clampCameraDistance();
+          panCameraByPixels(next.x - pinch.x, next.y - pinch.y);
+        }
+        pinch = next;
+        return;
+      }
+    }
     if (!drag) return;
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
     drag.moved += Math.abs(dx) + Math.abs(dy);
@@ -4760,11 +4887,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     drag.x = e.clientX; drag.y = e.clientY;
     const cam = S.camera;
     if (drag.pan) {
-      const b = S.pickOut.basis;
-      if (b) {
-        const s = cam.dist / b.f;
-        cam.pan = V.add(cam.pan, V.add(V.scale(b.Rt, -dx * s), V.scale(b.Up, dy * s)));
-      }
+      panCameraByPixels(dx, dy);
     } else {
       if (Math.abs(dx) + Math.abs(dy) > 2) cancelTopView();
       cam.yaw -= dx * 0.0055;
@@ -4772,6 +4895,13 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     }
   });
   cv.addEventListener("pointerup", (e) => {
+    const endedPinch = e.pointerType === "touch" && !!pinch;
+    if (e.pointerType === "touch") touchPointers.delete(e.pointerId);
+    if (endedPinch) {
+      pinch = touchPointers.size > 1 ? currentPinch() : null;
+      drag = null;
+      return;
+    }
     const wasClick = drag && drag.btn === 0 && !drag.pan && drag.moved < 6;
     drag = null;
     if (!wasClick) return;
@@ -4827,8 +4957,13 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     }
     if (best) focusLibrationPoint(best);
   });
-  cv.addEventListener("pointercancel", () => { drag = null; });
-  cv.addEventListener("lostpointercapture", () => { drag = null; });
+  const cancelPointer = (e) => {
+    if (e && e.pointerType === "touch") touchPointers.delete(e.pointerId);
+    drag = null;
+    if (touchPointers.size < 2) pinch = null;
+  };
+  cv.addEventListener("pointercancel", cancelPointer);
+  cv.addEventListener("lostpointercapture", cancelPointer);
   cv.addEventListener("contextmenu", (e) => e.preventDefault());
   cv.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -4837,9 +4972,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     S.camera.dist *= Math.pow(1.14, e.deltaY > 0 ? 1 : -1);
     // zoom floor: just above the focused body’s surface, so the camera
     // can’t end up inside the planet (which filled the screen with texture)
-    const fbZ = S.camera.focusMode === "body" ? S.camera.focusBody : null;
-    const minD = fbZ && BODIES[fbZ] ? BODIES[fbZ].radius * 1.12 : 3;
-    S.camera.dist = Math.min(Math.max(S.camera.dist, minD), 4e10);
+    clampCameraDistance();
   }, { passive: false });
   cv.addEventListener("dblclick", (e) => {
     const rect = cv.getBoundingClientRect();
@@ -5122,7 +5255,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
   }
 
   /* trimmed auto-camera for offline (GIF) rendering — same shot rules */
-  function gifAutoCamStep(cam2, result, t, dtF, smp, gshot, frameBody) {
+  function gifAutoCamStep(cam2, result, t, dtF, smp, gshot, frameBody, initialSnap) {
     const jd = result.epochJD + t / DAY;
     if (smp.cr3bp && globalThis.CR3BP) {
       const system = globalThis.CR3BP.getSystem(smp.cr3bpSystem);
@@ -5139,7 +5272,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       cam2.pan = [0, 0, 0];
       const distance = stableAutoDistance(cam2, "cr3bp:" + system.id,
         Math.max(extent * 5.5, BODIES[system.secondaryId].radius * 8));
-      easeAutoDistance(cam2, distance, dtF);
+      easeAutoDistance(cam2, distance, dtF, initialSnap);
       return;
     }
     const cen = BODIES[smp.cen];
@@ -5180,7 +5313,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       const range = V.mag(V.sub(smp.w, sunWorld));
       dist = autoPairDistance(cam2, smp.w, "sun", jd, displayFrameBody, range);
     }
-    easeAutoDistance(cam2, dist, dtF);
+    easeAutoDistance(cam2, dist, dtF, initialSnap);
   }
 
   function gifReferenceFrame(camMode, selectedFrame, sample) {
@@ -5231,6 +5364,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     delete cam2._autoFitKey;
     delete cam2._autoFitDist;
     delete cam2._autoFitFresh;
+    delete cam2._autoFitTransition;
     const gshot = { mode: "", sinceT: 0, cen: "" };
     const selectedFrame = S.frameBody;
     const resumePlayback = !!S.playing;
@@ -5242,7 +5376,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       // open with a slow drift in from wherever the live camera was
       const smp0 = ME.sampleAtTime(exportResult, times[0]);
       if (smp0) gifAutoCamStep(cam2, exportResult, times[0], 30, smp0, gshot,
-        gifReferenceFrame(camMode, selectedFrame, smp0));
+        gifReferenceFrame(camMode, selectedFrame, smp0), true);
     }
     S.playing = false;
     updatePlayBtn();
@@ -5483,8 +5617,16 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
   function initSelectors() {
     const savedStore = missionStore();
     const savedNames = Object.keys(savedStore).sort();
-    $("presetSel").innerHTML =
-      globalThis.Missions.PRESETS.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("") +
+    const presetGroups = globalThis.Missions.CATALOG_GROUPS || ["Missions"];
+    const presets = globalThis.Missions.PRESETS;
+    const groupedPresetHtml = presetGroups.map((group) => {
+      const entries = presets.filter((preset) => (preset.category || "Missions") === group);
+      if (!entries.length) return "";
+      return `<optgroup label="${esc(group)}">` + entries.map((preset) =>
+        `<option value="${esc(preset.id)}">${esc(preset.name)}` +
+        `${preset.status === "archived" ? " — archived" : ""}</option>`).join("") + `</optgroup>`;
+    }).join("");
+    $("presetSel").innerHTML = groupedPresetHtml +
       (savedNames.length
         ? `<optgroup label="My missions">` + savedNames.map((nm2) =>
             `<option value="local:${encodeURIComponent(nm2)}">${esc(nm2)}</option>`).join("") + `</optgroup>`

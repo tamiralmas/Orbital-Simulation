@@ -3,7 +3,7 @@
   "$id": "https://mission-trajectory-planner.invalid/schema/mission.schema.json",
   "title": "Mission Trajectory Planner mission",
   "description": "Portable mission definition consumed by the buildless Mission Trajectory Planner.",
-  "x-mtp-version": "1.19.1",
+  "x-mtp-version": "1.24.0",
   "type": "object",
   "additionalProperties": true,
   "required": [
@@ -316,7 +316,7 @@
   "$defs": {
     "launch": {
       "title": "Launch → MECO / parking orbit",
-      "description": "With a named site, starts at the exact selected pad at T+0, then uses a one-second schematic visual bridge to MECO (ascent aerodynamics are not simulated; ascent Δv is bookkept with loss + Earth-rotation estimates). Ordinary launches use a site-compatible direct-ascent plane; Target Plane launches preserve that transfer plane and show the required powered-ascent dogleg. 'MECO ellipse' delivers a suborbital-periapsis transfer ellipse whose apoapsis is the target altitude — add an Insertion (at apoapsis) to circularize, like a real OMS-2 burn. 'direct' inserts straight into the circular orbit (legacy). A blank site with Direct insertion is an orbital-state initialization and does not invent a surface ascent. A launch site constrains inclination to ≥ its latitude.",
+      "description": "With a named site, starts at the exact selected pad at T+0, then uses a realistically timed guided-ascent bridge to MECO. The bridge follows a smooth vertical-rise/gravity-turn profile and ends on the exact solved conic; vehicle-specific staging and aerodynamics remain outside the Planner, while ascent Δv is bookkept with loss + Earth-rotation estimates. Ordinary launches use a site-compatible direct-ascent plane; Target Plane launches preserve that transfer plane and show the required powered-ascent dogleg. 'MECO ellipse' delivers a suborbital-periapsis transfer ellipse whose apoapsis is the target altitude — add an Insertion (at apoapsis) to circularize, like a real OMS-2 burn. 'direct' inserts straight into the circular orbit (legacy). A blank site with Direct insertion is an orbital-state initialization and does not invent a surface ascent. A launch site constrains inclination to ≥ its latitude.",
       "type": "object",
       "additionalProperties": true,
       "required": [
@@ -393,6 +393,12 @@
             "meco",
             "direct"
           ]
+        },
+        "ascentMin": {
+          "type": "number",
+          "title": "Guided ascent duration (min)",
+          "default": 8.5,
+          "minimum": 1
         },
         "altKm": {
           "type": "number",

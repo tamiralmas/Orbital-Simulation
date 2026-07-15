@@ -918,7 +918,14 @@
     }
     if (!chosen) return null;
     const b = chosen.event._burn;
-    const raw = Math.max(0, Math.min(1, (tNow - chosen.start) / chosen.duration));
+    // A bounded escape guide must finish raising by ignition. Previously the
+    // escape window reserved 25% of its duration for the post-burn handoff,
+    // so the pre-burn fraction stopped near 0.84 and the displayed lunar AP
+    // appeared to stall around 35,000 km before becoming an open trajectory.
+    const rampEnd = chosen.mode === "escape" ? chosen.event.t
+      : chosen.start + chosen.duration;
+    const raw = Math.max(0, Math.min(1,
+      (tNow - chosen.start) / Math.max(rampEnd - chosen.start, 1e-9)));
     const f = raw * raw * (3 - 2 * raw);
     const apoOpen = chosen.mode === "escape" && tNow >= chosen.event.t;
     let solvedBlend = 0;
@@ -976,6 +983,72 @@
     };
   }
 
+  function thrustDirectionLabel(direction, state) {
+    const d = V.norm(direction || [0, 0, 0]);
+    if (!state || V.mag(d) === 0) return "VECTOR";
+    const v = V.norm(state.v), r = V.norm(state.r);
+    const n = V.norm(V.cross(state.r, state.v));
+    const tests = [
+      [V.dot(d, v), "PROGRADE"], [-V.dot(d, v), "RETROGRADE"],
+      [V.dot(d, r), "RADIAL OUT"], [-V.dot(d, r), "RADIAL IN"],
+      [V.dot(d, n), "NORMAL"], [-V.dot(d, n), "ANTINORMAL"],
+    ].sort((a, b) => b[0] - a[0]);
+    return tests[0][0] >= 0.82 ? tests[0][1] : "VECTOR";
+  }
+
+  /* Truthful engine/thrust readout for both propagation models. A finite
+     burn is genuinely active over a time interval. Ordinary Planner burns
+     are impulses, so their longer visual cue is explicitly called a preview
+     rather than pretending the engine is continuously firing. */
+  function thrustCueState(result, tNow, currentState) {
+    if (!result || !currentState || currentState.landed) return {
+      active: false, engineOn: false, label: "OFF", direction: null,
+    };
+    const mission = result.mission;
+    const segment = mission && mission.segments && mission.segments[currentState.seg];
+    if (segment && segment.type === "launch" &&
+        tNow >= segment._t0 - 1e-6 && tNow <= segment._t1 + 1e-6) {
+      let direction = V.norm(currentState.v);
+      if (V.mag(direction) === 0) direction = V.norm(currentState.r);
+      return {
+        active: true, engineOn: true, schematic: true, direction,
+        directionLabel: "ASCENT",
+        label: "ON · ASCENT MODEL · FLIGHT PATH",
+      };
+    }
+    if (segment && segment.type === "finite_burn" &&
+        tNow >= segment._t0 - 1e-6 && tNow <= segment._t1 + 1e-6) {
+      const law = String(segment.direction || "prograde");
+      let direction = law === "retrograde" ? V.scale(V.norm(currentState.v), -1)
+        : law === "inertial"
+          ? V.norm([+segment.dirX || 0, +segment.dirY || 0, +segment.dirZ || 0])
+          : V.norm(currentState.v);
+      if (V.mag(direction) === 0) direction = V.norm(currentState.r);
+      const directionLabel = law === "inertial"
+        ? thrustDirectionLabel(direction, currentState) : law.toUpperCase();
+      return {
+        active: true, engineOn: true, finite: true, direction, directionLabel,
+        thrustN: +segment.thrustN || 0,
+        label: `ON · ${directionLabel} · ${(+segment.thrustN || 0).toFixed(0)} N`,
+      };
+    }
+    const preview = burnPreviewState(result, tNow, currentState);
+    const burn = preview && preview.event && preview.event._burn;
+    if (burn) {
+      const direction = V.norm(V.sub(burn.v1, burn.v0));
+      if (V.mag(direction) > 0) {
+        const directionLabel = thrustDirectionLabel(direction,
+          preview.state || currentState);
+        return {
+          active: true, engineOn: false, impulse: true, direction,
+          directionLabel, event: preview.event,
+          label: `IMPULSE PREVIEW · ${directionLabel}`,
+        };
+      }
+    }
+    return { active: false, engineOn: false, label: "OFF", direction: null };
+  }
+
   /* Visual-only spacecraft state used around a burn. Escape states are exact
      from ignition onward; their continuous local coast must never be replaced
      by screen-space interpolation toward a distant SOI point. */
@@ -1027,6 +1100,18 @@
       umbraEndRadius: Math.max(0, occulterRadius * (1 - displayLength / umbraLength)),
       penumbraEndRadius: occulterRadius + displayLength *
         (lightRadius + occulterRadius) / distance,
+    };
+  }
+
+  function burnPreviewNotice(preview) {
+    if (!preview) return null;
+    const pct = Math.round(preview.fraction * 100);
+    const action = preview.mode === "capture" ? "CAPTURE / AP LOWERING"
+      : (preview.mode === "escape" ? (preview.apoOpen
+        ? "ESCAPE / AP OPEN" : "ESCAPE / AP RAISING") : "BURN");
+    return {
+      primary: `IDEALIZED ${action} ${pct}%`,
+      secondary: "DISPLAY PREVIEW · SOLVER BURN IS INSTANTANEOUS",
     };
   }
 
@@ -1357,22 +1442,6 @@
           g.font = "10px Consolas, monospace";
           g.fillText(mark.label, pr.x + 6, pr.y - 5);
         }
-        g.restore();
-      }
-      if (preview) {
-        const pct = Math.round(preview.fraction * 100);
-        const action = preview.mode === "capture" ? "CAPTURE / AP LOWERING"
-          : (preview.mode === "escape" ? (preview.apoOpen
-            ? "ESCAPE / AP OPEN"
-            : "ESCAPE / AP RAISING") : "BURN");
-        const label = `IDEALIZED ${action} ${pct}% · SOLVER BURN IS INSTANTANEOUS`;
-        g.save();
-        g.globalAlpha = 0.92;
-        g.fillStyle = (P().events && P().events.burn) || PAL_DEFAULT.events.burn;
-        g.fillRect(14, 12, 3, 13);
-        g.fillStyle = P().labelPlanet || PAL_DEFAULT.labelPlanet;
-        g.font = "10px Consolas, monospace";
-        g.fillText(label, 22, 22);
         g.restore();
       }
     }
@@ -1960,6 +2029,54 @@
           bodyWorld, shipJD === jd ? displayFrame : null, displayFrame));
         let ang = 0;
         if (tip) ang = Math.atan2(tip.y - p.y, tip.x - p.x);
+        const thrustCue = thrustCueState(result, tNow, renderShipSmp);
+        if (thrustCue.active && thrustCue.direction) {
+          const cueScale = (38 * p.z) / f;
+          const cueWorld = V.add(renderShipSmp.w,
+            V.scale(thrustCue.direction, cueScale));
+          const cueTip = project(pointInDisplayFrame(cueWorld, frameBody, shipJD, jd,
+            bodyWorld, shipJD === jd ? displayFrame : null, displayFrame));
+          if (cueTip) {
+            const cueAngle = Math.atan2(cueTip.y - p.y, cueTip.x - p.x);
+            const pulse = thrustCue.engineOn ? 0.82 + 0.18 * Math.sin(tNow * 0.18) : 0.72;
+            g.save();
+            g.translate(p.x, p.y);
+            g.rotate(cueAngle);
+            g.globalAlpha *= pulse;
+            g.strokeStyle = P().events.burn || "#f85149";
+            g.fillStyle = P().events.burn || "#f85149";
+            g.lineWidth = P().paperBodies ? 1.2 : 1.8;
+            if (P().paperBodies) g.setLineDash([5, 3]);
+            g.beginPath(); g.moveTo(10, 0); g.lineTo(39, 0); g.stroke();
+            g.setLineDash([]);
+            g.beginPath();
+            g.moveTo(39, 0); g.lineTo(32, -3.5); g.lineTo(32, 3.5);
+            g.closePath(); g.fill();
+            // Plume points opposite acceleration. Blueprint keeps a precise
+            // outline; Cinematic adds the ember glow appropriate to its UI.
+            if (!P().paperBodies) {
+              const plume = g.createLinearGradient(-25, 0, -5, 0);
+              plume.addColorStop(0, "rgba(255,106,61,0)");
+              plume.addColorStop(1, "rgba(255,190,120,0.92)");
+              g.fillStyle = plume;
+            } else g.fillStyle = "rgba(198,40,40,0.18)";
+            g.beginPath();
+            g.moveTo(-5, 0); g.lineTo(-22, -4.5); g.lineTo(-15, 0);
+            g.lineTo(-22, 4.5); g.closePath(); g.fill();
+            if (P().paperBodies) {
+              g.strokeStyle = P().events.burn || "#c62828";
+              g.stroke();
+            }
+            g.restore();
+            if (opts.labels !== false) {
+              g.fillStyle = P().events.burn || "#f85149";
+              g.font = "9px Consolas, monospace";
+              g.fillText(thrustCue.engineOn ? "THRUST" : "BURN VECTOR",
+                p.x + Math.cos(cueAngle) * 43 + 4,
+                p.y + Math.sin(cueAngle) * 43 - 4);
+            }
+          }
+        }
         const gr = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, 12);
         gr.addColorStop(0, `rgba(${P().shipGlowRGB},0.5)`);
         gr.addColorStop(1, `rgba(${P().shipGlowRGB},0)`);
@@ -2070,6 +2187,8 @@
 
   globalThis.MTPRender = {
     createCamera, draw, invalidateCache, burnPreviewState, burnPreviewDisplayState,
+    burnPreviewNotice,
+    thrustCueState,
     librationPointWorld,
     // Small pure-geometry surface for headless regression tests. Keeping
     // these helpers here lets tests verify render coordinates without a DOM
@@ -2082,11 +2201,13 @@
       osculatingGeometry,
       burnPreviewState,
       burnPreviewDisplayState,
+      thrustCueState,
       burnPreviewTimings,
       stateInBurnFrame,
       shouldDrawFiniteApsis,
       isStaticApsisFrame,
       scaleBarLayout,
+      burnPreviewNotice,
       localToFrame,
       nextPolylineIndex,
       hasPolylineBreak,

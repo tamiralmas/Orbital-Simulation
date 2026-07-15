@@ -86,6 +86,9 @@
 
   let current = null;
   let openPane = null;
+  const mobileMedia = globalThis.matchMedia
+    ? globalThis.matchMedia("(max-width: 720px)") : { matches: false };
+  let mobileSnapshot = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -116,6 +119,10 @@
 
   function setPane(pane) {
     openPane = pane;
+    if (pane && mobileMedia.matches) {
+      const app = $("app");
+      if (app) app.classList.add("left-collapsed");
+    }
     const right = $("right");
     if (right) right.classList.toggle("open", !!pane);
     if (pane) {
@@ -141,12 +148,15 @@
     const app = $("app");
     const leftTgl = $("leftTgl");
     const rightTgl = $("rightTgl");
-    if (leftTgl) leftTgl.textContent = app.classList.contains("left-collapsed") ? "»" : "«";
+    if (leftTgl) leftTgl.textContent = mobileMedia.matches
+      ? (app.classList.contains("left-collapsed") ? "PLAN" : "CLOSE")
+      : (app.classList.contains("left-collapsed") ? "»" : "«");
     if (rightTgl) {
       const closed = current === "cinematic"
         ? !openPane
         : app.classList.contains("right-collapsed");
-      rightTgl.textContent = closed ? "«" : "»";
+      rightTgl.textContent = mobileMedia.matches
+        ? (closed ? "DATA" : "CLOSE") : (closed ? "«" : "»");
     }
   }
 
@@ -183,7 +193,9 @@
     const cm = $("cineMeta");
     if (cm) {
       const start = isFinite(epochMs) ? new Date(epochMs).toISOString().slice(0, 10) : "—";
-      cm.textContent = start + " → " + endDate + " · " + segCount + " segments · Δv " +
+      const vehicle = txt("hudVehicle") || "Vehicle";
+      cm.textContent = vehicle + " · " + start + " → " + endDate + " · " +
+        segCount + " segments · Δv " +
         (dv && dv !== "—" ? dv : "—") + " · " + frameLabel;
     }
   }
@@ -203,13 +215,61 @@
     }
   }
 
+  function setCineHudDetails(expanded, persist) {
+    const hud = $("hud");
+    const toggle = $("cineHudDetails");
+    if (!hud || !toggle) return;
+    hud.classList.toggle("hud-details-expanded", !!expanded);
+    toggle.textContent = expanded ? "DETAILS −" : "DETAILS +";
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    toggle.title = expanded ? "Hide apsis and engine details" :
+      "Show apsis and engine details";
+    if (persist) {
+      try { localStorage.setItem("mtp-cine-hud-details", expanded ? "1" : "0"); } catch (e) {}
+    }
+  }
+
+  function syncMobileMode() {
+    const app = $("app");
+    if (!app) return;
+    if (mobileMedia.matches && !mobileSnapshot) {
+      mobileSnapshot = {
+        leftCollapsed: app.classList.contains("left-collapsed"),
+        rightCollapsed: app.classList.contains("right-collapsed"),
+        pane: openPane,
+        hudCollapsed: !!($("hud") && $("hud").classList.contains("hud-collapsed")),
+        displayCollapsed: !!($("dispOpts") && $("dispOpts").classList.contains("collapsed")),
+      };
+      app.classList.add("left-collapsed", "right-collapsed");
+      setPane(null);
+      if ($("dispOpts")) $("dispOpts").classList.add("collapsed");
+      setHudCollapsed(true, false);
+    } else if (!mobileMedia.matches && mobileSnapshot) {
+      app.classList.toggle("left-collapsed", mobileSnapshot.leftCollapsed);
+      app.classList.toggle("right-collapsed", mobileSnapshot.rightCollapsed);
+      if ($("dispOpts")) $("dispOpts").classList.toggle("collapsed",
+        mobileSnapshot.displayCollapsed);
+      setHudCollapsed(mobileSnapshot.hudCollapsed, false);
+      const restoredPane = mobileSnapshot.pane;
+      mobileSnapshot = null;
+      setPane(restoredPane);
+    }
+    syncTgls();
+    requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+  }
+
   /* ------------------------------- boot -------------------------------- */
   let saved = null;
   let savedHud = null;
+  let savedCineHud = null;
   try { saved = localStorage.getItem("mtp-theme"); } catch (e) {}
   try { savedHud = localStorage.getItem("mtp-hud-collapsed"); } catch (e) {}
+  try { savedCineHud = localStorage.getItem("mtp-cine-hud-details"); } catch (e) {}
   applyTheme(saved === "cinematic" || saved === "blueprint" ? saved : "blueprint", false);
   setHudCollapsed(savedHud === "1", false);
+  setCineHudDetails(savedCineHud === "1", false);
+  syncMobileMode();
+  if (mobileMedia.addEventListener) mobileMedia.addEventListener("change", syncMobileMode);
 
   const btn = $("btnTheme");
   if (btn) btn.addEventListener("click", () =>
@@ -226,22 +286,37 @@
   const leftTgl = $("leftTgl");
   const rightTgl = $("rightTgl");
   const hudToggle = $("hudToggle");
+  const cineHudDetails = $("cineHudDetails");
   if (leftTgl) leftTgl.addEventListener("click", () => {
+    if (mobileMedia.matches && app.classList.contains("left-collapsed")) {
+      app.classList.add("right-collapsed");
+      setPane(null);
+    }
     app.classList.toggle("left-collapsed");
     syncTgls();
     requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
   });
   if (rightTgl) rightTgl.addEventListener("click", () => {
     if (current === "cinematic") {
-      setPane(openPane ? null : "scriptPane");
+      setPane(openPane ? null : (mobileMedia.matches ? "dataPane" : "scriptPane"));
     } else {
+      const openingMobileTools = mobileMedia.matches &&
+        app.classList.contains("right-collapsed");
+      if (openingMobileTools)
+        app.classList.add("left-collapsed");
       app.classList.toggle("right-collapsed");
+      if (openingMobileTools) {
+        const dataTab = document.querySelector('.tabbtn[data-pane="dataPane"]');
+        if (dataTab) dataTab.click();
+      }
       syncTgls();
       requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
     }
   });
   if (hudToggle) hudToggle.addEventListener("click", () =>
     setHudCollapsed(!$("hud").classList.contains("hud-collapsed"), true));
+  if (cineHudDetails) cineHudDetails.addEventListener("click", () =>
+    setCineHudDetails(!$("hud").classList.contains("hud-details-expanded"), true));
 
   /* collapsible display options (blueprint) */
   const dispTgl = $("dispTgl");

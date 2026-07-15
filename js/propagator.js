@@ -14,8 +14,10 @@
  *  - Transfers are solved with Lambert's problem; encounter periapsis is
  *    targeted with a 1-D aim-point offset search (a simplified B-plane
  *    targeting scheme).
- *  - Launch/landing are modeled as instantaneous state changes with
- *    bookkeeping estimates (no ascent/entry aerodynamics).
+ *  - Named-site launches use a timed, guided inverse-dynamics ascent display;
+ *    blank-site launches initialize an orbital state. Landing remains a
+ *    bookkeeping state change. Vehicle-specific ascent/entry aerodynamics are
+ *    outside the Planner.
  * ========================================================================== */
 "use strict";
 
@@ -45,10 +47,12 @@
       label: "Launch → MECO / parking orbit",
       short: "LAUNCH",
       color: "#7ee787",
-      doc: "With a named site, starts at the exact selected pad at T+0, then uses a one-second " +
-           "schematic visual bridge to MECO (ascent aerodynamics are not " +
-           "simulated; ascent Δv is bookkept with loss + Earth-rotation " +
-           "estimates). Ordinary launches use a site-compatible direct-ascent " +
+      doc: "With a named site, starts at the exact selected pad at T+0, then uses a realistically " +
+           "timed guided-ascent bridge to MECO. The bridge follows a smooth " +
+           "vertical-rise/gravity-turn profile and ends on the exact solved conic; " +
+           "vehicle-specific staging and aerodynamics remain outside the Planner, " +
+           "while ascent Δv is bookkept with loss + Earth-rotation estimates. " +
+           "Ordinary launches use a site-compatible direct-ascent " +
            "plane; Target Plane launches preserve that transfer plane and show " +
            "the required powered-ascent dogleg. 'MECO ellipse' delivers a suborbital-periapsis " +
            "transfer ellipse whose apoapsis is the target altitude — add an " +
@@ -62,6 +66,7 @@
         { k: "site", t: "site", label: "Launch site (Earth)", def: "ksc" },
         { k: "ascent", t: "sel", label: "Ascent mode", def: "meco",
           opts: ["meco", "direct"] },
+        { k: "ascentMin", t: "num", label: "Guided ascent duration (min)", def: 8.5, min: 1 },
         { k: "altKm", t: "num", label: "Target altitude (km)", def: 200, min: 1 },
         { k: "incDeg", t: "num", label: "Inclination (°)", def: 28.5 },
         { k: "raanDeg", t: "num", label: "RAAN Ω (°)", def: 0 },
@@ -484,6 +489,11 @@
       // The UI uses it to interpolate curved propagation arcs faithfully.
       _interp: interpMode || null,
     };
+    if (s.landed && Number.isFinite(s.surfaceLat) && Number.isFinite(s.surfaceLon)) {
+      sample.surfaceLat = s.surfaceLat;
+      sample.surfaceLon = s.surfaceLon;
+      sample.surfaceBody = s.surfaceBody || s.cen;
+    }
     if (s.cr3bp) {
       sample.cr3bp = true;
       sample.cr3bpSystem = s.cr3bpSystem;
@@ -548,6 +558,12 @@
       t: sample.t,
       landed: !!sample.landed,
     };
+    if (sample.landed && Number.isFinite(sample.surfaceLat) &&
+        Number.isFinite(sample.surfaceLon)) {
+      state.surfaceLat = sample.surfaceLat;
+      state.surfaceLon = sample.surfaceLon;
+      state.surfaceBody = sample.surfaceBody || sample.cen;
+    }
     if (sample.forceW) state.forceW = V.clone(sample.forceW);
     if (sample.forceWorldV) state.forceWorldV = V.clone(sample.forceWorldV);
     if (sample.forceModel) state.forceModel = sample.forceModel;
@@ -1812,13 +1828,12 @@
     return true;
   }
 
-  /* Launch ascent is still outside this patched-conic engine's dynamics.
-   * These helpers make that instantaneous approximation visible without
-   * inventing an aerodynamic solution: a one-second, non-Kepler bridge starts
-   * at the selected rotating pad and ends at the solved MECO state. Keeping
-   * the bridge this short preserves the date-pinned historical timelines. */
-  const LAUNCH_VISUAL_SECONDS = 1;
-  const LAUNCH_VISUAL_STEPS = 20;
+  /* Launch remains a guided inverse-dynamics display model rather than a
+   * vehicle-specific six-DOF simulation. Unlike the former one-second bridge,
+   * it uses a realistic powered-flight duration and a resolved vertical-rise /
+   * gravity-turn path. Exact pad and MECO endpoint invariants are retained. */
+  const LAUNCH_INITIALIZATION_SECONDS = 1;
+  const LAUNCH_SAMPLE_SECONDS = 5;
 
   function bodyAxialFrame(body) {
     const tilt = (body.tiltDeg || 0) * C.DEG;
@@ -1950,37 +1965,66 @@
     return { r, v: V.add(rotatingV, frameRate) };
   }
 
-  function emitSchematicLaunch(ctx, segIdx, body, pad, meco) {
-    const rEnd = V.mag(meco.r), d0 = V.norm(pad.r), d1 = V.norm(meco.r);
-    for (let k = 0; k <= LAUNCH_VISUAL_STEPS; k++) {
-      const f = k / LAUNCH_VISUAL_STEPS;
-      const radialProgress = f * f * (3 - 2 * f);
-      // A shared radial/angular easing made the surface-to-orbit bridge read
-      // as a straight chord in close LEO views. Lead the initial vertical rise
-      // before pitching through the angular gravity turn; endpoints and the
-      // one-second historical timing contract remain unchanged.
-      const downrangeProgress = k === 0 ? 0 : (k === LAUNCH_VISUAL_STEPS
-        ? 1 : f * f);
+  function smootherstep01(value) {
+    const x = Math.max(0, Math.min(1, value));
+    return x * x * x * (x * (x * 6 - 15) + 10);
+  }
+
+  function guidedAscentPosition(body, pad, meco, fraction) {
+    const f = Math.max(0, Math.min(1, fraction));
+    const d0 = V.norm(pad.r), d1 = V.norm(meco.r);
+    const targetAltitude = Math.max(0, V.mag(meco.r) - body.radius);
+    // This rise matches the broad shape of a launch profile: deliberate low-
+    // altitude climb, rapid middle ascent, then a horizontal-speed finish.
+    const altitudeProgress = Math.pow(f, 1.5) * (2.5 - 1.5 * f);
+    // Hold the opening nearly vertical before rolling smoothly downrange.
+    const turnFraction = smootherstep01((f - 0.035) / 0.965);
+    const downrangeProgress = Math.pow(turnFraction, 1.85);
+    const radius = body.radius + targetAltitude * altitudeProgress;
+    const direction = downrangeProgress <= 0 ? d0
+      : (downrangeProgress >= 1 ? d1
+        : slerpDirection(d0, d1, downrangeProgress));
+    return V.scale(direction, radius);
+  }
+
+  function guidedAscentVelocity(body, pad, meco, fraction, durationS) {
+    const eps = Math.min(0.0025, Math.max(1e-5, 1 / durationS));
+    const lo = Math.max(0, fraction - eps);
+    const hi = Math.min(1, fraction + eps);
+    return V.scale(V.sub(guidedAscentPosition(body, pad, meco, hi),
+      guidedAscentPosition(body, pad, meco, lo)),
+    1 / Math.max(1e-9, (hi - lo) * durationS));
+  }
+
+  function emitGuidedLaunch(ctx, segIdx, body, pad, meco, durationS) {
+    const steps = Math.max(48, Math.ceil(durationS / LAUNCH_SAMPLE_SECONDS));
+    for (let k = 0; k <= steps; k++) {
+      const f = k / steps;
       if (k === 0) {
         ctx.state = { cen: body.id, r: V.clone(pad.r), v: V.clone(pad.v),
-          t: pad.t, landed: false };
-      } else if (k === LAUNCH_VISUAL_STEPS) {
+          t: pad.t, landed: false, poweredAscent: true };
+      } else if (k === steps) {
         ctx.state = { cen: body.id, r: V.clone(meco.r), v: V.clone(meco.v),
-          t: meco.t, landed: false };
+          t: meco.t, landed: false, poweredAscent: true };
       } else {
-        const radius = body.radius + (rEnd - body.radius) * radialProgress;
+        const pathVelocity = guidedAscentVelocity(body, pad, meco, f, durationS);
+        const startBlend = 1 - smootherstep01(f / 0.08);
+        const endBlend = smootherstep01((f - 0.82) / 0.18);
+        let velocity = V.add(V.scale(pathVelocity, 1 - startBlend),
+          V.scale(pad.v, startBlend));
+        velocity = V.add(V.scale(velocity, 1 - endBlend),
+          V.scale(meco.v, endBlend));
         ctx.state = {
           cen: body.id,
-          r: V.scale(slerpDirection(d0, d1, downrangeProgress), radius),
-          v: V.add(V.scale(pad.v, 1 - radialProgress),
-            V.scale(meco.v, radialProgress)),
-          t: pad.t + LAUNCH_VISUAL_SECONDS * f,
+          r: guidedAscentPosition(body, pad, meco, f),
+          v: velocity,
+          t: pad.t + durationS * f,
           landed: false,
+          poweredAscent: true,
         };
       }
-      // Deliberately ordinary interpolation: this schematic bridge is not a
-      // Kepler arc and must never be reconstructed as one by the renderer.
-      pushSample(ctx, segIdx);
+      // This interval is guidance-shaped, never a Kepler coast.
+      pushSample(ctx, segIdx, "guided-ascent");
     }
   }
 
@@ -2341,7 +2385,7 @@
         // A target-plane launch preserves the transfer plane even when the
         // fixed pad is not in it. Scan in the body's equatorial basis (the
         // same basis used for the site and launch conic), then let the
-        // schematic powered ascent bridge carry the required dogleg.
+        // guided powered-ascent bridge carry the required dogleg.
         const si = Math.sin(inc), ci = Math.cos(inc);
         const candidates = [];
         let minTargetDot = Infinity;
@@ -2389,7 +2433,7 @@
         seg._info.raanAuto = ((Om / C.DEG) % 360 + 360) % 360;
         if (Number.isFinite(bestDot))
           seg._info.planeMissDeg = Math.asin(Math.min(1, bestDot)) / C.DEG;
-        // A site-backed target-plane launch explicitly uses the schematic
+        // A site-backed target-plane launch explicitly uses the guided
         // powered-ascent dogleg below, so retain its geometry as info rather
         // than misreporting the requested inclination as invalid. The old
         // warning remains useful only for unconstrained/no-site launches.
@@ -2455,9 +2499,15 @@
         r: axialToWorld(localRv.r, siteGeom.frame),
         v: axialToWorld(localRv.v, siteGeom.frame),
       } : localRv;
+      const defaultAscentMin = body.id === "earth" ? 8.5
+        : (body.atmosphereKm ? 7 : 5.5);
+      const requestedAscentMin = Number(seg.ascentMin);
+      const ascentDurationS = 60 * (requestedAscentMin >= 1
+        ? requestedAscentMin : defaultAscentMin);
       const mecoState = {
         cen: body.id, r: rv.r, v: rv.v,
-        t: launchT + LAUNCH_VISUAL_SECONDS, landed: false,
+        t: launchT + (siteGeom ? ascentDurationS : LAUNCH_INITIALIZATION_SECONDS),
+        landed: false,
       };
 
       const padFrame = siteGeom ? siteGeom.frame : bodyAxialFrame(body);
@@ -2482,10 +2532,15 @@
       seg._info.vCirc = vc;
       seg._info.rotCredit = rotCredit;
       seg._info.ascentDv = orbitInitialization ? 0 : vBurnout + loss - rotCredit;
+      if (siteGeom) {
+        seg._info.ascentDurationS = ascentDurationS;
+        seg._info.ascentModel = "guided gravity turn";
+      }
       if (orbitInitialization) {
         // Validation/design presets with no launch site begin from a reviewed
         // orbit rather than an invented surface point. Keep the established
-        // one-second downstream timing with two coincident orbital samples.
+        // one-second downstream timing with two coincident orbital samples;
+        // this is initialization metadata, not an ascent display.
         seg._info.orbitInitialization = true;
         ctx.state = { ...mecoState, t: launchT };
         addEvent(ctx, segIdx, "launch",
@@ -2500,9 +2555,10 @@
         addEvent(ctx, segIdx, "launch",
           `Launch — ${body.name}${site.id && body.id === "earth" ? " (" + site.name + ")" : ""}, ` +
           `${mode === "meco" ? mecoLabel : altKm.toFixed(0) + " km circular"} × ${incDeg.toFixed(1)}° ` +
-          `(ascent Δv ≈ ${seg._info.ascentDv.toFixed(1)} km/s incl. losses − rotation, bookkept)`,
+          `(${(ascentDurationS / 60).toFixed(1)} min guided ascent; ` +
+          `Δv ≈ ${seg._info.ascentDv.toFixed(1)} km/s incl. losses − rotation, bookkept)`,
           { body: body.id });
-        emitSchematicLaunch(ctx, segIdx, body, padState, mecoState);
+        emitGuidedLaunch(ctx, segIdx, body, padState, mecoState, ascentDurationS);
       }
       if (body.gasGiant) warn(seg, "Launching from a gas giant is… optimistic.");
       if (mode === "meco") {
@@ -3604,14 +3660,26 @@
       addEvent(ctx, segIdx, "burn",
         `Deorbit & descent — Δv ≈ ${speed.toFixed(3)} km/s (idealized: full orbital velocity)`,
         { dv: speed, body: s.cen });
-      // schematic descent arc: interpolate radius down to the surface
-      const site = V.scale(V.norm(s.r), body.radius);
+      // Schematic descent arc: keep the touchdown point fixed in the body's
+      // rotating surface frame. The old inertial site vector made the Moon
+      // rotate underneath a stationary landed vehicle.
       const durDesc = Math.max(+seg.descentHours || 0.5, 0.01) * 3600;
+      const touchdownT = s.t + durDesc;
+      const touchdownJD = jdAt(ctx, touchdownT);
+      const fixedSite = A.bodyLatLon(body, V.norm(s.r), touchdownJD);
+      const surfaceLat = fixedSite ? fixedSite.phi : 0;
+      const surfaceLon = fixedSite ? fixedSite.lam : 0;
+      const siteAt = (t) => V.scale(
+        A.bodyDirection(body, surfaceLat, surfaceLon, jdAt(ctx, t)), body.radius);
       const n = 24;
       for (let i = 1; i <= n; i++) {
         const f = i / n;
-        const rr = V.add(V.scale(s.r, 1 - f), V.scale(site, f));
-        ctx.state = { cen: s.cen, r: rr, v: [0, 0, 0], t: s.t + f * durDesc, landed: i === n };
+        const t = s.t + f * durDesc;
+        const rr = V.add(V.scale(s.r, 1 - f), V.scale(siteAt(t), f));
+        ctx.state = { cen: s.cen, r: rr, v: [0, 0, 0], t, landed: i === n };
+        if (i === n) Object.assign(ctx.state, {
+          surfaceLat, surfaceLon, surfaceBody: s.cen,
+        });
         pushSample(ctx, segIdx);
       }
       addEvent(ctx, segIdx, "landing", `Touchdown — ${body.name}`, { body: s.cen });
@@ -3620,7 +3688,11 @@
         const m = 12;
         const t0 = ctx.state.t;
         for (let i = 1; i <= m; i++) {
-          ctx.state = { cen: s.cen, r: site, v: [0, 0, 0], t: t0 + (i / m) * stay, landed: true };
+          const t = t0 + (i / m) * stay;
+          ctx.state = {
+            cen: s.cen, r: siteAt(t), v: [0, 0, 0], t, landed: true,
+            surfaceLat, surfaceLon, surfaceBody: s.cen,
+          };
           pushSample(ctx, segIdx);
         }
       }
@@ -3765,6 +3837,7 @@
       name: vehicle.name,
       role: vehicle.role || (vehicle.id === "primary" ? "primary" : "vehicle"),
       color: vehicle.color || (vehicle.id === "primary" ? "#e95420" : "#52d4c5"),
+      mission: vehicleMission,
       samples: ctx.samples,
       events: ctx.events.sort((a, b) => a.t - b.t),
       totalDv: ctx.totalDv,
@@ -3915,6 +3988,23 @@
     const f = (t - a.t) / span;
     const lerp = (p, q) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, p[2] + (q[2] - p[2]) * f];
     let r, v;
+    if (a.landed && b.landed && a.cen === b.cen &&
+        Number.isFinite(a.surfaceLat) && Number.isFinite(a.surfaceLon) &&
+        Math.abs(a.surfaceLat - b.surfaceLat) < 1e-12 &&
+        Math.abs(a.surfaceLon - b.surfaceLon) < 1e-12) {
+      const body = BODIES[a.surfaceBody || a.cen];
+      const jd = result.epochJD + t / DAY;
+      const r = V.scale(A.bodyDirection(body, a.surfaceLat, a.surfaceLon, jd), body.radius);
+      const w = a.cen === "sun" ? V.clone(r) : V.add(A.bodyWorld(a.cen, jd), r);
+      return {
+        t, cen: a.cen, seg: b.seg, landed: true,
+        vehicleId: a.vehicleId || result.id || "primary",
+        dockedTo: null, r, v: [0, 0, 0], w,
+        surfaceLat: a.surfaceLat, surfaceLon: a.surfaceLon,
+        surfaceBody: a.surfaceBody || a.cen,
+        interp: true, surfaceFixed: true,
+      };
+    }
     const joined = a.seg === b.seg && a.dockedTo && a.dockedTo === b.dockedTo &&
       result.joinedSegments && result.joinedSegments[a.seg];
     if (joined && joined.providerResult && t >= joined.startT - 1e-9 &&

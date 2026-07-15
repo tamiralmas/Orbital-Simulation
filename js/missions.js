@@ -94,6 +94,52 @@
     },
 
     {
+      id: "artemis2",
+      name: "Artemis II (2026)",
+      epoch: "2026-04-01T22:35:00Z",
+      spacecraft: { name: "Orion Integrity + ESM", dryKg: 15300, propKg: "",
+        isp: 316, fovDeg: 70,
+        notes: "Propellant tracking is off: the SLS/ICPS and Orion propulsion " +
+               "events are represented at stack level, not as a stage-resolved mass model." },
+      description:
+        "Date-pinned historical reconstruction of the completed first crewed " +
+        "Artemis flight. Orion launched from Pad 39B, spent about a day in a " +
+        "high Earth checkout orbit, flew an unpowered lunar swingby 6,545 km " +
+        "above the surface, and splashed down off California after 9 days, " +
+        "1 hour, and 32 minutes. The 46,000-mile-class checkout orbit is " +
+        "represented as a two-apsis Earth conic; the lunar and return legs use " +
+        "this app's Lambert/patched-conic model rather than NASA navigation " +
+        "ephemerides or a stage-resolved SLS/Orion simulation.",
+      history: [
+        "2026-04-01 22:35 UTC — SLS launch from Kennedy Space Center Pad 39B",
+        "T+00:49 — ICPS burn begins the roughly 46,000-mile-high checkout orbit",
+        "2026-04-02 — Orion completes a 43-second perigee-raise burn",
+        "2026-04-02 23:49 UTC — 5 min 49 s translunar injection; Δv about 0.388 km/s",
+        "2026-04-06 04:37 UTC — Orion enters the Moon's sphere of influence",
+        "2026-04-06 23:00 UTC — Closest approach: about 6,545 km above the Moon",
+        "2026-04-06 23:02 UTC — Maximum Earth distance: 252,756 miles",
+        "2026-04-07 17:25 UTC — Orion exits the Moon's sphere of influence",
+        "2026-04-11 00:07 UTC — Pacific splashdown off San Diego",
+      ],
+      segments: [
+        { type: "launch", body: "earth", site: "ksc", ascent: "meco",
+          altKm: 185, incDeg: 28.5, raanDeg: 0,
+          targetPlane: "moon", planeTofDays: 5.02 },
+        { type: "insertion", at: "apoapsis", shape: "elliptical",
+          apoKm: 74030, maxDays: 0.5 },
+        { type: "coast", days: 1.036, mode: "kepler" },
+        { type: "transfer", target: "moon", tofDays: 4.0245,
+          periKm: 6545, side: "B", optWait: "immediate" },
+        { type: "coast", days: 0.6365, mode: "kepler" },
+        { type: "observe", target: "moon", days: 0.1764, mode: "kepler" },
+        { type: "flyby", dvKms: 0, maxDays: 4 },
+        { type: "return", target: "earth", tofDays: 3.216,
+          periKm: 40, optWait: "immediate" },
+        { type: "reentry", interfaceKm: 120, maxDays: 4, descentMin: 20 },
+      ],
+    },
+
+    {
       id: "cassini",
       name: "Cassini–Huygens VVEJGA (1997)",
       epoch: "1997-10-15T08:43:00Z",
@@ -688,7 +734,7 @@
     {
       id: "crew_dragon_iss_docking",
       name: "Crew Dragon-ISS rendezvous and docking",
-      epoch: "2026-07-14T07:28:22.422Z",
+      epoch: "2026-07-14T07:22:52.422Z",
       spacecraft: { name: "Crew Dragon high-delta-v intercept demonstrator",
         dryKg: 9500, propKg: 1400, isp: 300, fovDeg: 80,
         notes: "A compressed deterministic rendezvous design. The direct orbit " +
@@ -696,7 +742,7 @@
                "of a specific Crew Dragon flight or proximity-operations GNC." },
       description:
         "A repeatable multi-vehicle intercept exercise against an ISS SGP4 track. " +
-        "At this fixed epoch, a KSC launch initializes about 2.6 degrees from the " +
+        "At this fixed guided-ascent launch window, a KSC launch remains close to the " +
         "station plane, so the compressed Lambert intercept and velocity match cost " +
         "about 0.402 km/s; this is deliberately not a realistic terminal approach. " +
         "Dragon then docks, follows the exact joined ISS state for three hours and " +
@@ -704,7 +750,7 @@
       history: [
         "Validation mission: compressed design exercise, not a historical flight",
         "ISS target: release-pinned public TLE with SGP4 propagation",
-        "Compressed intercept: 1.25 h and about 0.402 km/s; joined coast: 3.00 h",
+        "Post-MECO intercept: 1.25 h and about 0.403 km/s; joined coast: 3.00 h",
       ],
       segments: [
         { type: "launch", body: "earth", site: "ksc", ascent: "direct",
@@ -1186,7 +1232,204 @@
         },
       ],
     },
+
+    {
+      id: "europa_clipper_mega",
+      name: "Europa Clipper MEGA trajectory (2024)",
+      epoch: "2024-10-14T16:06:00Z",
+      spacecraft: { name: "Europa Clipper", dryKg: 6000, propKg: "",
+        isp: 315, fovDeg: 50,
+        notes: "Historical route reconstruction with propellant tracking off. " +
+               "The patched-conic TCMs absorb simplified catalog-ephemeris error; " +
+               "they are not the mission's flown maneuver budget." },
+      description:
+        "A sourced reconstruction of Europa Clipper's Mars-Earth Gravity " +
+        "Assist route: launch from Kennedy on 14 October 2024, the 884 km " +
+        "Mars pass on 1 March 2025, the planned December 2026 Earth assist, " +
+        "and planned April 2030 Jupiter arrival. A representative Jovian " +
+        "phasing coast and Europa flyby follow. The real arrival uses a close " +
+        "Ganymede braking assist and a roughly year-long pump-down tour; those " +
+        "multi-moon details are outside this bounded patched-conic preset.",
+      history: [
+        "2024-10-14 16:06 UTC — Falcon Heavy launch from Kennedy LC-39A",
+        "2025-03-01 17:57 UTC — Mars gravity assist, 884 km altitude",
+        "December 2026 — planned Earth gravity assist, about 3,200 km altitude",
+        "2030-04-11 — planned Jupiter orbit insertion after Ganymede assist",
+        "Prime tour: dozens of Europa flybys while orbiting Jupiter, not Europa",
+      ],
+      segments: [
+        { type: "launch", body: "earth", site: "ksc", ascent: "meco",
+          altKm: 185, incDeg: 28.5, raanDeg: 0 },
+        { type: "insertion", at: "apoapsis", shape: "circular", maxDays: 0.5 },
+        { type: "coast", days: 0.08, mode: "kepler" },
+        { type: "depart", target: "mars", tofDays: 138, periKm: 884, side: "A" },
+        { type: "flyby", dvKms: 0, maxDays: 30 },
+        { type: "transfer", target: "earth", tofDays: 641, periKm: 3200,
+          side: "A", optWait: "immediate" },
+        { type: "flyby", dvKms: 0, maxDays: 30 },
+        { type: "transfer", target: "jupiter", tofDays: 1236, periKm: 200000,
+          side: "A", optWait: "immediate" },
+        { type: "insertion", at: "periapsis", shape: "elliptical",
+          apoKm: 12000000, maxDays: 130 },
+        { type: "coast", days: 270, mode: "kepler" },
+        { type: "transfer", target: "europa", tofDays: 5, periKm: 50,
+          side: "A", optWait: "optimal" },
+        { type: "flyby", dvKms: 0, maxDays: 20 },
+        { type: "coast", days: 30, mode: "kepler" },
+      ],
+    },
+
+    {
+      id: "parker_early_venus_tour",
+      name: "Parker Solar Probe — early Venus tour (2018)",
+      epoch: "2018-08-12T07:31:00Z",
+      spacecraft: { name: "Parker Solar Probe", dryKg: 685, propKg: "",
+        isp: 220, fovDeg: 50,
+        notes: "Historical early-tour reconstruction with propellant tracking " +
+               "off. The app's single-revolution Lambert solver cannot reproduce " +
+               "the complete seven-assist resonant sequence without false burns." },
+      description:
+        "The first two Venus gravity assists of Parker Solar Probe's " +
+        "perihelion-lowering campaign. The 3 October 2018 and 26 December " +
+        "2019 encounters show Venus removing heliocentric energy and lowering " +
+        "solar perihelion. The flown mission used seven Venus assists and 24 " +
+        "planned close-Sun orbits; this preset intentionally stops before the " +
+        "multi-revolution same-body legs that the current Lambert solver cannot " +
+        "represent faithfully.",
+      history: [
+        "2018-08-12 — Delta IV Heavy launch from Cape Canaveral",
+        "2018-10-03 — Venus gravity assist 1, about 2,415 km altitude",
+        "2019-12-26 — Venus gravity assist 2, about 3,009 km altitude",
+        "Complete mission design: seven Venus assists and 24 close-Sun orbits",
+      ],
+      segments: [
+        { type: "launch", body: "earth", site: "ksc", ascent: "meco",
+          altKm: 185, incDeg: 28.5, raanDeg: 0 },
+        { type: "insertion", at: "apoapsis", shape: "circular", maxDays: 0.5 },
+        { type: "coast", days: 0.08, mode: "kepler" },
+        { type: "depart", target: "venus", tofDays: 52, periKm: 2415, side: "B" },
+        { type: "flyby", dvKms: 0, maxDays: 30 },
+        { type: "transfer", target: "venus", tofDays: 449, periKm: 3009,
+          side: "B", optWait: "immediate" },
+        { type: "flyby", dvKms: 0, maxDays: 30 },
+        { type: "coast", days: 180, mode: "kepler" },
+      ],
+    },
   ];
+
+  const CATALOG_GROUPS = Object.freeze([
+    "Featured",
+    "Historical",
+    "Design Studies",
+    "Operations",
+    "Engineering / Validation",
+    "Quick Start / Legacy",
+    "Archive",
+  ]);
+
+  // Catalog metadata is kept separate from the physical mission definitions:
+  // moving a preset between product groups must never alter its date-pinned
+  // trajectory. Sources describe the intended reconstruction, not telemetry.
+  const CATALOG_META = Object.freeze({
+    apollo11: { category: "Quick Start / Legacy", fidelity: "simplified-historical",
+      status: "legacy", runtime: "medium", featureTags: ["lunar", "tutorial", "return"] },
+    apollo13: { category: "Featured", fidelity: "simplified-historical",
+      status: "active", runtime: "medium", featured: true,
+      featureTags: ["lunar", "free-return", "flyby"] },
+    artemis2: { category: "Featured", fidelity: "date-pinned-historical",
+      status: "active", runtime: "medium", featured: true,
+      sources: [
+        "https://www.nasa.gov/news-release/nasas-artemis-ii-mission-leaves-earth-orbit-for-flight-around-moon/",
+        "https://www.nasa.gov/blogs/missions/2026/04/06/artemis-ii-flight-day-6-lunar-flyby-updates/",
+        "https://www.nasa.gov/news-release/nasa-welcomes-record-setting-artemis-ii-moonfarers-back-to-earth/",
+      ],
+      featureTags: ["lunar", "crewed", "flyby", "free-return", "reentry"] },
+    cassini: { category: "Featured", fidelity: "date-pinned-historical",
+      status: "active", runtime: "long", featured: true,
+      featureTags: ["gravity-assist", "outer-planets", "observation"] },
+    voyager1: { category: "Featured", fidelity: "date-pinned-historical",
+      status: "active", runtime: "long", featured: true,
+      featureTags: ["gravity-assist", "outer-planets", "interstellar"] },
+    voyager2: { category: "Featured", fidelity: "date-pinned-historical",
+      status: "active", runtime: "long", featured: true,
+      featureTags: ["grand-tour", "gravity-assist", "interstellar"] },
+    mars2026: { category: "Design Studies", fidelity: "design-study",
+      status: "active", runtime: "medium", featureTags: ["lambert", "mars", "capture"] },
+    artemis: { category: "Design Studies", fidelity: "concept-study",
+      status: "active", runtime: "medium", featureTags: ["lunar", "return", "reentry"] },
+    europa: { category: "Archive", fidelity: "hypothetical-direct",
+      status: "archived", runtime: "long", featureTags: ["jupiter", "europa", "legacy"] },
+    titan: { category: "Archive", fidelity: "hypothetical-direct",
+      status: "archived", runtime: "long", featureTags: ["saturn", "titan", "legacy"] },
+    earth_moon_l2_halo: { category: "Design Studies", fidelity: "ideal-cr3bp",
+      status: "active", runtime: "short", featureTags: ["cr3bp", "halo", "stationkeeping"] },
+    finite_burn_demo: { category: "Design Studies", fidelity: "teaching-model",
+      status: "active", runtime: "short", featureTags: ["finite-thrust", "apoapsis"] },
+    sun_earth_l1_lissajous: { category: "Design Studies", fidelity: "ideal-cr3bp",
+      status: "active", runtime: "short", featureTags: ["cr3bp", "lissajous", "stationkeeping"] },
+    leo_environment_lab: { category: "Engineering / Validation", fidelity: "validation",
+      status: "active", runtime: "short", featureTags: ["drag", "harmonics", "horizons"] },
+    geo_srp_horizons: { category: "Engineering / Validation", fidelity: "validation",
+      status: "active", runtime: "short", featureTags: ["srp", "eclipse", "horizons"] },
+    sdp4_validation: { category: "Engineering / Validation", fidelity: "validation",
+      status: "active", runtime: "short", featureTags: ["sdp4", "teme", "reference"] },
+    leo_disposal_uncertainty: { category: "Engineering / Validation", fidelity: "validation",
+      status: "active", runtime: "short", featureTags: ["uncertainty", "operations", "disposal"] },
+    mars_joint_target_lab: { category: "Engineering / Validation", fidelity: "validation",
+      status: "active", runtime: "medium", featureTags: ["targeting", "mars", "b-plane"] },
+    iss_orbital_reference: { category: "Engineering / Validation", fidelity: "gp-reference",
+      status: "active", runtime: "short", featureTags: ["sgp4", "iss", "reference"] },
+    crew_dragon_iss_docking: { category: "Featured", fidelity: "teaching-reconstruction",
+      status: "active", runtime: "short", featured: true,
+      featureTags: ["rendezvous", "docking", "multi-vehicle"] },
+    apollo11_full: { category: "Featured", fidelity: "teaching-reconstruction",
+      status: "active", runtime: "long", featured: true,
+      featureTags: ["lunar", "multi-vehicle", "landing"] },
+    jwst_l2_operations: { category: "Featured", fidelity: "ideal-cr3bp-operations",
+      status: "active", runtime: "short", featured: true,
+      featureTags: ["l2", "halo", "stationkeeping"] },
+    gateway_halo_operations: { category: "Operations", fidelity: "ideal-cr3bp-operations",
+      status: "active", runtime: "short", featureTags: ["lunar", "halo", "stationkeeping"] },
+    apophis_2029_recon: { category: "Operations", fidelity: "concept-study",
+      status: "active", runtime: "short", featureTags: ["small-body", "formation", "flyby"] },
+    osiris_rex_sample_return: { category: "Featured", fidelity: "teaching-reconstruction",
+      status: "active", runtime: "short", featured: true,
+      featureTags: ["sample-return", "separation", "earth"] },
+    sso_imaging_campaign: { category: "Operations", fidelity: "operations-study",
+      status: "active", runtime: "short", featureTags: ["access", "imaging", "j2"] },
+    electric_geo_raise: { category: "Featured", fidelity: "teaching-model",
+      status: "active", runtime: "long", featured: true,
+      featureTags: ["finite-thrust", "multi-vehicle", "orbit-raise"] },
+    leo_conjunction_lab: { category: "Operations", fidelity: "validation-study",
+      status: "active", runtime: "short", featureTags: ["conjunction", "uncertainty", "avoidance"] },
+    europa_clipper_mega: { category: "Featured", fidelity: "date-pinned-historical",
+      status: "active", runtime: "long", featured: true,
+      sources: [
+        "https://science.nasa.gov/mission/europa-clipper/mission-timeline/",
+        "https://www.jpl.nasa.gov/press-kits/europa-clipper/mission/",
+      ],
+      featureTags: ["gravity-assist", "jupiter", "europa"] },
+    parker_early_venus_tour: { category: "Historical", fidelity: "date-pinned-historical-subset",
+      status: "active", runtime: "medium",
+      sources: [
+        "https://www.nasa.gov/solar-system/parker-solar-probe-changed-the-game-before-it-even-launched/",
+        "https://parker.gsfc.nasa.gov/overview.html",
+      ],
+      featureTags: ["gravity-assist", "venus", "solar"] },
+  });
+
+  for (const preset of PRESETS) {
+    const meta = CATALOG_META[preset.id] || {};
+    Object.assign(preset, {
+      category: meta.category || "Design Studies",
+      fidelity: meta.fidelity || "simplified",
+      status: meta.status || "active",
+      sources: Array.isArray(meta.sources) ? meta.sources.slice() : [],
+      featureTags: Array.isArray(meta.featureTags) ? meta.featureTags.slice() : [],
+      featured: !!meta.featured,
+      expectedRuntime: meta.runtime || "medium",
+    });
+  }
 
   function getPreset(id) {
     const p = PRESETS.find((x) => x.id === id);
@@ -1196,5 +1439,5 @@
     return JSON.parse(JSON.stringify(mission));
   }
 
-  globalThis.Missions = { PRESETS, getPreset };
+  globalThis.Missions = { PRESETS, CATALOG_GROUPS, getPreset };
 })();
