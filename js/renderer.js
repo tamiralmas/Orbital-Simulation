@@ -230,6 +230,7 @@
   }
 
   /* --------------------------- starfield ------------------------------- */
+  const _starColors = { key: "", list: [] };   // per-theme cached rgba strings
   const STARS = (() => {
     const out = [];
     let s = 987654321;
@@ -254,6 +255,9 @@
     { r0: 2.03, r1: 2.27, col: "#c4b28e", a: 0.60 },   // A ring
     { r0: 2.32, r1: 2.34, col: "#b7a685", a: 0.30 },   // F ring (thin)
   ];
+  // Body-relative ring circle geometry survives across frames; rebuilding
+  // ~66 lines x 73 points of vector math per paint made Saturn views churn.
+  const _ringCache = { key: "", lines: [] };
 
   /* ---------------------- frame-relative traj cache -------------------- */
   const TRAJECTORY_DENSE_STEP = 1.5 * Math.PI / 180;
@@ -341,17 +345,22 @@
      point's depth relative to the body center is not sufficient in a
      perspective view: near the apparent limb, the far ray/sphere
      intersection can still be closer to the camera than the center. */
-  function trajectoryFrontPassSkip(point, eyeWorld, sx, sy, disks) {
+  function trajectoryFrontPassSkip(point, eyeWorld, sx, sy, disks, offset) {
     let overlapsDisk = false;
+    // Most points overlap no disk; translate into world space lazily so the
+    // per-point front passes stay allocation-free on the common path.
+    let worldPoint = offset ? null : point;
     for (let i = 0; i < disks.length; i++) {
       const d = disks[i];
       const dx = sx - d.x, dy = sy - d.y;
       if (dx * dx + dy * dy >= (d.r + 2) * (d.r + 2)) continue;
       overlapsDisk = true;
       const sphere = d.sphere;
-      if (sphere && typeof A.pointOccludedBySphere === "function" &&
-          A.pointOccludedBySphere(point, eyeWorld, sphere.center, sphere.radius))
-        return true;
+      if (sphere && typeof A.pointOccludedBySphere === "function") {
+        if (!worldPoint) worldPoint = V.add(point, offset);
+        if (A.pointOccludedBySphere(worldPoint, eyeWorld, sphere.center, sphere.radius))
+          return true;
+      }
     }
     // The front pass only repairs trajectory pieces covered by a body in the
     // first painter pass; everything outside those disks is already visible.
@@ -1186,17 +1195,32 @@
     g.fillStyle = P().bg;
     g.fillRect(0, 0, w, h);
 
-    /* stars (infinitely distant: rotation only) */
-    for (const st of STARS) {
-      const ze = V.dot(st.d, F);
-      if (ze <= 0.02) continue;
-      const sx = cx + (f * V.dot(st.d, Rt)) / ze;
-      const sy = cy - (f * V.dot(st.d, Up)) / ze;
-      if (sx < 0 || sx > w || sy < 0 || sy > h) continue;
-      const stA = st.m * 0.6 * (P().starAlpha == null ? 1 : P().starAlpha);
-      if (stA <= 0.01) continue;
-      g.fillStyle = `rgba(${P().starRGB},${stA.toFixed(2)})`;
-      g.fillRect(sx, sy, st.big ? 1.6 : 1, st.big ? 1.6 : 1);
+    /* stars (infinitely distant: rotation only). Star magnitudes are static,
+       so the per-star color strings only change with the theme palette;
+       rebuilding them per frame re-parsed 420 rgba() strings per paint. */
+    {
+      const pal = P();
+      const starKey = pal.starRGB + "|" + pal.starAlpha;
+      if (_starColors.key !== starKey) {
+        _starColors.key = starKey;
+        _starColors.list = STARS.map((st) => {
+          const stA = st.m * 0.6 * (pal.starAlpha == null ? 1 : pal.starAlpha);
+          return stA <= 0.01 ? null : `rgba(${pal.starRGB},${stA.toFixed(2)})`;
+        });
+      }
+      const colors = _starColors.list;
+      for (let i = 0; i < STARS.length; i++) {
+        const col = colors[i];
+        if (!col) continue;
+        const st = STARS[i];
+        const ze = V.dot(st.d, F);
+        if (ze <= 0.02) continue;
+        const sx = cx + (f * V.dot(st.d, Rt)) / ze;
+        const sy = cy - (f * V.dot(st.d, Up)) / ze;
+        if (sx < 0 || sx > w || sy < 0 || sy > h) continue;
+        g.fillStyle = col;
+        g.fillRect(sx, sy, st.big ? 1.6 : 1, st.big ? 1.6 : 1);
+      }
     }
 
     /* polyline with optional per-point skip (used for ring occlusion).
@@ -1517,8 +1541,8 @@
     const frontSkip = (p, ex, ey, ez) => {
       if (ez <= near) return true;
       const sx = cx + (f * ex) / ez, sy = cy - (f * ey) / ez;
-      const worldPoint = frameBody === "inertial" ? p : V.add(p, frameOffset);
-      return trajectoryFrontPassSkip(worldPoint, eyeWorld, sx, sy, bigDisks);
+      return trajectoryFrontPassSkip(p, eyeWorld, sx, sy, bigDisks,
+        frameBody === "inertial" ? null : frameOffset);
     };
     const fleetItems = Array.isArray(scene.multiCraft) ? scene.multiCraft.slice(0, 7) : [];
     const nativeFleetCount = fleetItems.reduce((count, craft) =>
@@ -1664,7 +1688,6 @@
     drawList.sort((a, b) => b.prj.z - a.prj.z);
     g.font = "11px Segoe UI, sans-serif";
 
-    let _ringGeom = null;    // per-frame geometry shared by the two half passes
     const drawRings = (id, b, prj, appR, half) => {
       // half: -1 = far side only, +1 = near side only
       const centerE = eye(bodyPos[id]);
@@ -1678,35 +1701,49 @@
         }
         return false;
       };
-      if (!_ringGeom || _ringGeom.id !== id) {
-        const tilt = (b.tiltDeg || 0) * Math.PI / 180;
-        const axActual = [Math.sin(tilt), 0, Math.cos(tilt)];
-        const e1Actual = V.norm([axActual[2], 0, -axActual[0]]);
-        const e2Actual = V.cross(axActual, e1Actual);
-        const e1 = vectorRelativeToDisplayFrame(e1Actual, displayFrame);
-        const e2 = vectorRelativeToDisplayFrame(e2Actual, displayFrame);
+      // Circles are built in body-relative display coordinates and translated
+      // per frame through polyline's offset argument, so both half passes and
+      // ordinary playback share one geometry. Per-band line counts and the
+      // ring basis join the key: zooming or a rotating synodic frame rebuild.
+      const tilt = (b.tiltDeg || 0) * Math.PI / 180;
+      const axActual = [Math.sin(tilt), 0, Math.cos(tilt)];
+      const e1Actual = V.norm([axActual[2], 0, -axActual[0]]);
+      const e2Actual = V.cross(axActual, e1Actual);
+      const e1 = vectorRelativeToDisplayFrame(e1Actual, displayFrame);
+      const e2 = vectorRelativeToDisplayFrame(e2Actual, displayFrame);
+      const widths = SATURN_BANDS.map((band) =>
+        ((band.r1 - band.r0) * b.radius * f) / prj.z);
+      const counts = widths.map((wPx) => wPx < 0.5 ? 0
+        : Math.max(2, Math.min(22, Math.round(wPx / 1.3))));
+      const qb = (x) => Math.round(x * 2048);
+      const key = id + "|" + counts.join(",") + "|" +
+        qb(e1[0]) + "," + qb(e1[1]) + "," + qb(e1[2]) + "," +
+        qb(e2[0]) + "," + qb(e2[1]) + "," + qb(e2[2]);
+      if (_ringCache.key !== key) {
         const lines = [];
-        for (const band of SATURN_BANDS) {
-          const wPx = ((band.r1 - band.r0) * b.radius * f) / prj.z;
-          if (wPx < 0.5) continue;
-          const nLines = Math.max(2, Math.min(22, Math.round(wPx / 1.3)));
+        for (let bi = 0; bi < SATURN_BANDS.length; bi++) {
+          const band = SATURN_BANDS[bi];
+          const nLines = counts[bi];
+          if (!nLines) continue;
           for (let li = 0; li < nLines; li++) {
             const rr = (band.r0 + ((li + 0.5) / nLines) * (band.r1 - band.r0)) * b.radius;
             const pts = [];
             for (let k = 0; k <= 72; k++) {
               const a = (k / 72) * 2 * Math.PI;
-              pts.push(V.add(bodyPos[id],
-                V.add(V.scale(e1, rr * Math.cos(a)), V.scale(e2, rr * Math.sin(a)))));
+              pts.push(V.add(V.scale(e1, rr * Math.cos(a)), V.scale(e2, rr * Math.sin(a))));
             }
-            lines.push({ pts, col: band.col, a: band.a, lw: Math.max(1, wPx / nLines + 0.25) });
+            lines.push({ pts, band: bi, n: nLines });
           }
         }
-        _ringGeom = { id, lines };
+        _ringCache.key = key;
+        _ringCache.lines = lines;
       }
-      for (const ln of _ringGeom.lines) {
-        g.strokeStyle = hexA(ln.col, ln.a);
-        g.lineWidth = ln.lw;
-        polyline(ln.pts, 1, skipFn);
+      const origin = bodyPos[id];
+      for (const ln of _ringCache.lines) {
+        const band = SATURN_BANDS[ln.band];
+        g.strokeStyle = hexA(band.col, band.a);
+        g.lineWidth = Math.max(1, widths[ln.band] / ln.n + 0.25);
+        polyline(ln.pts, 1, skipFn, undefined, undefined, origin);
       }
       g.lineWidth = 1;
     };

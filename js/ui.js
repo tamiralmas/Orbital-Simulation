@@ -182,8 +182,8 @@
         end: event._burn.exitT,
         body: event._burn.cen,
       }));
-    S.camEvT = events.filter((event) =>
-      isAutoEvent(event, AUTOCAM_SHOT_EVENTS)).map((event) => event.t);
+    S.camEv = events.filter((event) => isAutoEvent(event, AUTOCAM_SHOT_EVENTS));
+    S.camEvT = S.camEv.map((event) => event.t);
   }
 
   function refreshActiveGroundTrackLegs() {
@@ -214,7 +214,12 @@
     } catch (e) {
       console.error(e);
       banner("Engine error: " + e.message, true);
-      return;
+      // Keep the editor surfaces aligned with the mission being edited so the
+      // failing segment can be fixed; the canvas keeps the last good result.
+      buildVehicleSelector();
+      buildSegmentList();
+      updateScript();
+      return false;
     }
     globalThis.MTPRender.invalidateCache();
     refreshActivePlaybackEvents();
@@ -233,6 +238,7 @@
     updateHud();
     syncWindowApplySegments();
     analysisAfterRecompute();
+    return true;
   }
 
   function defaultSpacecraft() {
@@ -279,7 +285,9 @@
     S.expandedByVehicle = new Map([["primary", S.expanded]]);
     buildVehicleSelector();
     buildSpacecraftCard();
-    recompute(false);
+    // On an engine error the banner explains the failure; skip view/playback
+    // setup that would dereference a result this mission never produced.
+    if (!recompute(false)) return;
     configureWindowForMission();
     updateMissionMeta();
     applyMissionOperations(m);
@@ -3008,11 +3016,15 @@
   const AUTOCAM_SHOT_EVENTS = new Set(["burn", "flyby", "launch", "landing", "liftoff",
     "entry", "splashdown", "impact", "separation", "rendezvous", "dock", "undock"]);
   const isAutoEvent = (event, kinds) => kinds.has(event.kind) && !event.patchCorrection;
+  // minRate bounds how long the +/-windowS crawl zone can take in real time
+  // (2*windowS/minRate). The wide flyby/observe windows previously shared the
+  // 30 s/s floor, so a clustered encounter (obs boundaries around a flyby
+  // collapse the local cruise rate to its floor) crawled for a full minute.
   const AUTO_EVENT_PROFILES = Object.freeze({
     default: Object.freeze({ windowS: 100, divisor: 320, minRate: 30 }),
-    handoff: Object.freeze({ windowS: 240, divisor: 320, minRate: 30 }),
-    flyby: Object.freeze({ windowS: 900, divisor: 320, minRate: 30 }),
-    observe: Object.freeze({ windowS: 420, divisor: 320, minRate: 30 }),
+    handoff: Object.freeze({ windowS: 240, divisor: 320, minRate: 60 }),
+    flyby: Object.freeze({ windowS: 900, divisor: 320, minRate: 260 }),
+    observe: Object.freeze({ windowS: 420, divisor: 320, minRate: 120 }),
   });
 
   function autoEventProfile(event) {
@@ -3040,17 +3052,14 @@
     }
   }
 
-  function nearestAutoEvent(windowS) {
-    let best = null, bestD = Infinity;
-    const result = activeVehicleResult();
-    for (const e of result && result.events || []) {
-      if (!isAutoEvent(e, AUTOCAM_SHOT_EVENTS)) continue;
-      const d = e.t - S.tNow;
-      if (d > windowS || d < -0.5 * windowS) continue;
-      const ad = Math.abs(d);
-      if (ad < bestD) { bestD = ad; best = e; }
-    }
-    return best;
+  /** the encounter body a heliocentric near-event shot should frame:
+   *  the nearest shot event's target body (flybys carry `body`) when it is
+   *  a real body other than the current display center */
+  function encounterShotBody(nextEv, prevEv, dNextR, dPrevR, displayCenId) {
+    const ev = dNextR <= dPrevR ? nextEv : prevEv;
+    const body = ev && ev.body;
+    return body && body !== "sun" && body !== displayCenId && BODIES[body]
+      ? body : null;
   }
 
   /** time-dilation factor near events (only at fast playback speeds) */
@@ -3082,7 +3091,7 @@
     for (const window of S.obsWindows || []) {
       if (tAt >= window.start && tAt <= window.end)
         return Math.max(AUTO_EVENT_PROFILES.observe.minRate,
-          (window.end - window.start) / 18);
+          (window.end - window.start) / 10);
     }
     return Infinity;
   }
@@ -3112,7 +3121,7 @@
       const floorR = Math.max(profile.minRate, cruise / profile.divisor);
       const w = Math.max(wBase, floorR * 2.4);
       return Math.min(cruise,
-        floorR + Math.sqrt(Math.max(d - w, 0) * cruise / 3.0));
+        floorR + Math.sqrt(Math.max(d - w, 0) * cruise / 2.25));
     };
     const prevProfile = lo > 0 && profiles[lo - 1] || AUTO_EVENT_PROFILES.default;
     const nextProfile = lo < T.length && profiles[lo] || AUTO_EVENT_PROFILES.default;
@@ -3142,7 +3151,7 @@
     if (rateSmooth == null || !isFinite(rateSmooth) || rateSmooth <= 0) rateSmooth = target;
     // Brake deliberately, then restore cruise more slowly so Auto Time does
     // not surge away from flybys, observations, or gravity assists.
-    const tau = target < rateSmooth ? 1.5 : 5.0;
+    const tau = target < rateSmooth ? 1.5 : 3.5;
     const k = 1 - Math.exp(-(dt || 0.016) / tau);
     rateSmooth = Math.exp(Math.log(rateSmooth) +
       (Math.log(Math.max(target, 1)) - Math.log(rateSmooth)) * k);
@@ -3326,6 +3335,11 @@
       (shot.mode === "event" && dNextR < 7);   // bridge only tight major-event clusters
     let want = obsT ? "observe" : nearEvent ? "event"
       : (displayCenId !== "sun" ? "local" : "cruise");
+    const camEv = S.camEv || [];
+    const encounterBody = (want === "event" || shot.mode === "event") &&
+      displayCenId === "sun"
+      ? encounterShotBody(camEv[lo2], camEv[lo2 - 1], dNextR, dPrevR, displayCenId)
+      : null;
     const nowR = performance.now();
     const cenChanged = shot.cen !== displayCenId;
     if (want !== shot.mode) {
@@ -3341,6 +3355,14 @@
       const range = V.mag(V.sub(smp.w, tw));
       dist = autoPairDistance(cam, displaySmp.w, obsT, jd, wantFrame, range,
         "observe:" + obsT + ":" + wantFrame);
+    } else if (shot.mode === "event" && encounterBody) {
+      // Encounter approach/departure: frame the spacecraft with the event's
+      // target body (for example a flyby planet) instead of holding the wide
+      // Sun shot until the SOI switches the display center.
+      const tw = A.bodyWorld(encounterBody, jd);
+      const range = V.mag(V.sub(displaySmp.w, tw));
+      dist = autoPairDistance(cam, displaySmp.w, encounterBody, jd, wantFrame, range,
+        "event:" + encounterBody + ":" + wantFrame);
     } else if (displayCenId !== "sun") {
       const localR = displayCenId === displaySmp.cen ? displaySmp.r
         : V.sub(displaySmp.w, A.bodyWorld(displayCenId, jd));
@@ -3415,17 +3437,25 @@
     }
     return null;
   }
+  // Compare-before-write helper for the 10 Hz formation readout: identical
+  // text or HTML must not rebuild the subtree every playback tick.
+  function setHostText(host, text) {
+    if (host._formationHtml !== text) {
+      host.textContent = text;
+      host._formationHtml = text;
+    }
+  }
   function updateFormationReadout(sample) {
     const host = $("formationReadout");
     if (!host || !S.result || !S.result.vehicleResults) return;
     const ids = (S.result.vehicleOrder || Object.keys(S.result.vehicleResults))
       .filter((id) => id !== S.activeVehicleId);
     if (!ids.length) {
-      host.textContent = "Primary vehicle only.";
+      setHostText(host, "Primary vehicle only.");
       return;
     }
     if (!sample) {
-      host.textContent = "The selected vehicle has no state at this time.";
+      setHostText(host, "The selected vehicle has no state at this time.");
       return;
     }
     const rows = [];
@@ -3457,7 +3487,12 @@
         (relativeRate !== null ? ` / ${relativeRate.toFixed(2)} m/s` : "") +
         `${detail}</div>`);
     }
-    host.innerHTML = rows.length ? rows.join("") : "No simultaneous secondary state.";
+    const html = rows.length ? rows.join("") : "No simultaneous secondary state.";
+    // 10 Hz caller: rebuilding an identical subtree re-parses HTML every tick.
+    if (host._formationHtml !== html) {
+      host.innerHTML = html;
+      host._formationHtml = html;
+    }
   }
   function updateBurnNotice(preview) {
     const notice = $("burnNotice");
@@ -3473,6 +3508,7 @@
   }
 
   function updateHud() {
+    if (!S.result) return;
     const smp = currentSample();
     const jd = S.result.epochJD + S.tNow / DAY;
     const vehicle = activeVehicleDefinition();
@@ -3499,8 +3535,12 @@
     const seg = segments[smp.seg];
     const spec = seg ? ME.SEGMENT_TYPES[seg.type] : null;
     const hudSeg = setText("hudSeg", seg ? `#${smp.seg + 1} ${spec ? spec.short : seg.type}` : "—");
-    hudSeg.style.color =
+    const hudSegColor =
       (globalThis.MTPTheme && globalThis.MTPTheme.hudSegColor) || (spec ? spec.color : "#c9d1d9");
+    if (hudSeg._segColor !== hudSegColor) {
+      hudSeg.style.color = hudSegColor;
+      hudSeg._segColor = hudSegColor;
+    }
     const cenB = BODIES[smp.cen];
     const cr3bpSystem = smp.cr3bp && globalThis.CR3BP
       ? globalThis.CR3BP.getSystem(smp.cr3bpSystem) : null;
@@ -3518,7 +3558,12 @@
         ? "AP OPEN · PE —"
         : apsisText(apsisPreview ? apsisPreview.state : smp));
     setText("hudApsis", apsisValue);
-    if (altEl) altEl.title = "Osculating apsis: " + apsisValue;
+    // updateHud runs at 10 Hz during playback: compare before writing titles
+    // so identical tooltip strings do not dirty attributes every tick.
+    const setTitle = (el, value) => {
+      if (el && el.title !== value) el.title = value;
+    };
+    if (altEl) setTitle(altEl, "Osculating apsis: " + apsisValue);
     const thrustCue = globalThis.MTPRender && globalThis.MTPRender.thrustCueState
       ? globalThis.MTPRender.thrustCueState(vehicleResult, S.tNow, smp) : null;
     const engineEl = setText("hudEngine", thrustCue ? thrustCue.label : "OFF");
@@ -3526,13 +3571,13 @@
       const engineCell = engineEl.closest(".hud-cell");
       if (engineCell) {
         engineCell.classList.toggle("active", !!(thrustCue && thrustCue.active));
-        engineCell.title = thrustCue ? thrustCue.label : "Engine off";
+        setTitle(engineCell, thrustCue ? thrustCue.label : "Engine off");
       }
-      engineEl.title = thrustCue && thrustCue.impulse
+      setTitle(engineEl, thrustCue && thrustCue.impulse
         ? "Impulse burns are instantaneous; this previews the solved delta-v direction."
         : thrustCue && thrustCue.engineOn
           ? "Finite-thrust propagation is active in the shown acceleration direction."
-          : "No active or previewed burn.";
+          : "No active or previewed burn.");
     }
     const targetVehicleId = seg && (seg._targetVehicle || seg.targetVehicle || seg.fromVehicle);
     const targetVehicleResult = targetVehicleId && S.result.vehicleResults &&
@@ -4763,8 +4808,8 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
   // mission at monitor rate can issue millions of canvas operations per
   // second. Keep simulation/camera integration on every rAF, but cap Auto
   // Time and native fleet paint work at a stable 30 Hz. Single-vehicle manual
-  // playback remains smooth up to 60 Hz instead of duplicating work on high-
-  // refresh monitors; direct camera input while paused retains native rate.
+  // playback and direct camera input stay smooth up to 60 Hz instead of
+  // duplicating identical work on high-refresh monitors.
   const AUTO_RENDER_INTERVAL_MS = 1000 / 30;
   const MANUAL_RENDER_INTERVAL_MS = 1000 / 60;
   function hasComplexNativeScene() {
@@ -4776,6 +4821,33 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
   }
   let last = performance.now(), lastPaint = 0, lastHudPaint = 0;
   document.addEventListener("visibilitychange", () => { last = performance.now(); });
+  /* A fully settled scene (paused, no camera input, nothing eased or newly
+   * textured) is byte-identical from paint to paint, yet used to repaint the
+   * whole canvas at 30 Hz indefinitely. Stamp every input the scene draw
+   * consumes; when the stamp is unchanged, skip down to a slow safety cadence
+   * that still finishes budget-deferred sprite rebuilds. */
+  const IDLE_SAFETY_REPAINT_MS = 500;
+  const appEl = $("app");
+  const scrubEl = $("scrub");
+  let idleStamp = "";
+  let stampResultRef = null, stampCraftResults = [], stampSceneRev = 0;
+  function sceneStamp() {
+    if (S.result !== stampResultRef) { stampResultRef = S.result; stampSceneRev++; }
+    const crafts = AN.crafts || [];
+    let craftsChanged = crafts.length !== stampCraftResults.length;
+    for (let i = 0; !craftsChanged && i < crafts.length; i++)
+      craftsChanged = crafts[i].result !== stampCraftResults[i];
+    if (craftsChanged) { stampCraftResults = crafts.map((c) => c.result); stampSceneRev++; }
+    const c = S.camera, ff = c.freeFocus;
+    return S.tNow + "|" + c.dist + "|" + c.yaw + "|" + c.pitch + "|" + c.fov +
+      "|" + c.focusMode + "|" + c.focusBody +
+      "|" + c.pan[0] + "," + c.pan[1] + "," + c.pan[2] +
+      "|" + (ff ? ff[0] + "," + ff[1] + "," + ff[2] : "") +
+      "|" + S.frameBody + "|" + S.cr3bpSystem + "|" + S.activeVehicleId +
+      "|" + JSON.stringify(S.options) + "|" + cv.width + "x" + cv.height +
+      "|" + (appEl ? appEl.dataset.theme : "") + "|" + stampSceneRev +
+      "|" + (globalThis.MTPTex && MTPTex.version ? MTPTex.version() : 0);
+  }
   function frame(now) {
     // Do not convert a suspended/background tab into one giant playback step
     // when requestAnimationFrame resumes.
@@ -4787,10 +4859,15 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       S.tNow += advanceStep(dt);
       const playbackEnd = resultTimeBounds(activeVehicleResult()).end;
       if (S.tNow >= playbackEnd) {
-        S.tNow = playbackEnd; S.playing = false; updatePlayBtn(); updateHud();
+        S.tNow = playbackEnd; S.playing = false; updatePlayBtn();
+        if (scrubEl) scrubEl.value = S.tNow;
+        updateHud();
       }
-      $("scrub").value = S.tNow;
-      if (now - lastHudPaint >= 100) { updateHud(); lastHudPaint = now; }
+      // The scrubber thumb only needs HUD cadence, not monitor cadence.
+      if (now - lastHudPaint >= 100) {
+        if (scrubEl) scrubEl.value = S.tNow;
+        updateHud(); lastHudPaint = now;
+      }
     }
     const dh = $("dwellHint");
     if (dh) setText("dwellHint", S.speedMode === "auto"
@@ -4809,10 +4886,17 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
     const paintInterval = S.playing
       ? (S.speedMode === "auto" || hasComplexNativeScene()
         ? AUTO_RENDER_INTERVAL_MS : MANUAL_RENDER_INTERVAL_MS)
-      : (!drag ? AUTO_RENDER_INTERVAL_MS : 0);
+      : (!drag ? AUTO_RENDER_INTERVAL_MS : MANUAL_RENDER_INTERVAL_MS);
     if (paintInterval && now - lastPaint < paintInterval) {
       requestAnimationFrame(frame); return;
     }
+    if (!S.playing && !drag && !pinch) {
+      const stamp = sceneStamp();
+      if (stamp === idleStamp && now - lastPaint < IDLE_SAFETY_REPAINT_MS) {
+        requestAnimationFrame(frame); return;
+      }
+      idleStamp = stamp;
+    } else idleStamp = "";
     lastPaint = now;
     const dpr = canvasDpr || renderDpr();
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -5218,7 +5302,7 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
         times.push(t);
         const tg = autoRate(t, result);
         if (sm == null) sm = tg;
-        const tau = tg < sm ? 1.5 : 5.0;
+        const tau = tg < sm ? 1.5 : 3.5;
         const k = 1 - Math.exp(-dtF / tau);
         sm = Math.exp(Math.log(sm) + (Math.log(Math.max(tg, 1)) - Math.log(sm)) * k);
         let step = dtF * sm;
@@ -5291,6 +5375,11 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
           (gshot.cen !== smp.cen && t - gshot.sinceT > rate * 2.2))
         Object.assign(gshot, { mode: want, sinceT: t, cen: smp.cen });
     } else gshot.cen = smp.cen;
+    const camEv = S.camEv || [];
+    const encounterBody = (want === "event" || gshot.mode === "event") &&
+      smp.cen === "sun"
+      ? encounterShotBody(camEv[lo], camEv[lo - 1], dNextR, dPrevR, smp.cen)
+      : null;
 
     const displayFrameBody = frameBody || (smp.cen === "sun" ? "inertial" : smp.cen);
     let dist;
@@ -5299,6 +5388,13 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       const range = V.mag(V.sub(smp.w, tw));
       dist = autoPairDistance(cam2, smp.w, obsT, jd, displayFrameBody, range,
         "observe:" + obsT + ":" + displayFrameBody);
+    } else if (gshot.mode === "event" && encounterBody) {
+      // Match the live Auto camera's encounter framing: hold the spacecraft
+      // and the event's target body in one shot through the approach.
+      const tw = A.bodyWorld(encounterBody, jd);
+      const range = V.mag(V.sub(smp.w, tw));
+      dist = autoPairDistance(cam2, smp.w, encounterBody, jd, displayFrameBody, range,
+        "event:" + encounterBody + ":" + displayFrameBody);
     } else if (smp.cen !== "sun") {
       const rNow = Math.max(V.mag(smp.r), cen.radius * 1.1);
       const coe = A.rvToCoe(smp.r, smp.v, cen.mu);

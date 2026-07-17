@@ -899,15 +899,22 @@
         dom.utc.textContent = iso.slice(0, 10) + " " + iso.slice(11, 19) + " UTC";
       }
     }
+    // This runs every animation frame: only touch the DOM on real changes so
+    // identical text/class assignments cannot dirty style at monitor rate.
     if (dom.play) {
-      dom.play.textContent = playing ? "Pause" : "Play";
-      dom.play.setAttribute("aria-pressed", playing ? "true" : "false");
+      const playLabel = playing ? "Pause" : "Play";
+      if (dom.play.textContent !== playLabel) {
+        dom.play.textContent = playLabel;
+        dom.play.setAttribute("aria-pressed", playing ? "true" : "false");
+      }
     }
     if (dom.mode) {
       const atNow = playing && speed === 1 && Math.abs(simMs - Date.now()) < 5000;
-      dom.mode.className = atNow ? "is-live" : (playing ? "is-sim" : "is-paused");
-      dom.mode.textContent = playbackBoundary === "end" ? "END" :
+      const modeClass = atNow ? "is-live" : (playing ? "is-sim" : "is-paused");
+      const modeText = playbackBoundary === "end" ? "END" :
         (playbackBoundary === "start" ? "START" : (atNow ? "NOW" : (playing ? "SIM" : "PAUSED")));
+      if (dom.mode.className !== modeClass) dom.mode.className = modeClass;
+      if (dom.mode.textContent !== modeText) dom.mode.textContent = modeText;
     }
   }
 

@@ -663,6 +663,18 @@
       dt = 0.02 * Math.sqrt((rm * rm * rm) / mu);
     }
     dt = Math.min(dt, s.cen === "sun" ? 2.5 * DAY : 6 * 3600);
+    // Bound total work for very long arcs BEFORE the boundary refinements:
+    // raising dt after them (the old order) let a multi-year coast step
+    // straight across a short SOI transit or atmospheric dip, reporting a
+    // late/wrong event or a false miss.
+    dt = Math.max(dt, remaining / 3000, 1e-3);
+    // An endpoint-sign apsis stop cannot see a crossing wider than half a
+    // revolution; keep several steps per orbit while such a stop is armed.
+    if (opts.stop && (opts.stop.type === "periapsis" || opts.stop.type === "apoapsis") &&
+        alpha > 1e-14) {
+      const period = 2 * Math.PI * Math.sqrt(1 / (alpha * alpha * alpha * mu));
+      if (isFinite(period)) dt = Math.min(dt, period / 8);
+    }
     // refine near SOI boundaries so we cannot step across one
     const jd = jdAt(ctx, s.t);
     for (const ch of soiChildren(s.cen)) {
@@ -690,8 +702,7 @@
       if (rpOsc < stopR * 1.03)
         dt = Math.min(dt, Math.max(2, (0.3 * Math.max(rm - stopR, 50)) / Math.max(vm, 1e-3)));
     }
-    dt = Math.max(dt, remaining / 3000, 1e-3);
-    return Math.min(dt, remaining);
+    return Math.min(Math.max(dt, 1e-3), remaining);
   }
 
   /**
@@ -706,6 +717,12 @@
     const stop = opts.stop || { type: "time" };
     let remaining = durS;
     let steps = 0, transitions = 0;
+    // Rebuilt coast states must keep the spacecraft mass a finite burn left
+    // behind, or every sample in this arc loses its mass record.
+    const withMass = (state) => {
+      if (Number.isFinite(ctx.massKg) && ctx.massKg > 0) state.massKg = ctx.massKg;
+      return state;
+    };
     pushSample(ctx, segIdx);
 
     while (remaining > 1e-6) {
@@ -750,7 +767,7 @@
       }
 
       if (evals.length === 0) {
-        ctx.state = { cen: s.cen, r: cand.r, v: cand.v, t: tNew, landed: false };
+        ctx.state = withMass({ cen: s.cen, r: cand.r, v: cand.v, t: tNew, landed: false });
         remaining -= dt;
         pushSample(ctx, segIdx, mode);
         continue;
@@ -782,7 +799,7 @@
       }
 
       const stAtEv = advanceState(s, bestDt, mu, mode);
-      ctx.state = { cen: s.cen, r: stAtEv.r, v: stAtEv.v, t: s.t + bestDt, landed: false };
+      ctx.state = withMass({ cen: s.cen, r: stAtEv.r, v: stAtEv.v, t: s.t + bestDt, landed: false });
       remaining -= bestDt;
       pushSample(ctx, segIdx, mode);
 
@@ -805,12 +822,12 @@
         // Use the same world-state difference as pushSample/entry handling so
         // the two same-time samples are exactly continuous at the frame patch.
         const bs = relBodyState(s.cen, parent, jd);
-        ctx.state = {
+        ctx.state = withMass({
           cen: parent,
           r: V.add(ctx.state.r, bs.r),
           v: V.add(ctx.state.v, bs.v),
           t: ctx.state.t, landed: false,
-        };
+        });
         // nudge outward so we don't re-trigger
         addEvent(ctx, segIdx, "soi_exit",
           `Exit ${body.name} SOI → ${BODIES[parent].name} frame`, { body: parent });
@@ -823,12 +840,12 @@
         const chId = bestName.slice(3);
         const jd = jdAt(ctx, ctx.state.t);
         const bs = relBodyState(chId, s.cen, jd);
-        ctx.state = {
+        ctx.state = withMass({
           cen: chId,
           r: V.sub(ctx.state.r, bs.r),
           v: V.sub(ctx.state.v, bs.v),
           t: ctx.state.t, landed: false,
-        };
+        });
         addEvent(ctx, segIdx, "soi_entry",
           `Enter ${BODIES[chId].name} SOI (r=${Math.round(BODIES[chId].soi).toLocaleString()} km)`,
           { body: chId });
@@ -3108,6 +3125,13 @@
           const res0 = propagateArc(ctx, tau, { segIdx, mode: "kepler" });
           seg._info.waitS = tau;
           if (res0.reason !== "time") warn(seg, "Wait coast interrupted before ignition point.");
+          // The wait was optimized against the pre-coast central body; if the
+          // coast crossed an SOI the Lambert frame below would be wrong.
+          if (ctx.state.cen !== s.cen) {
+            warn(seg, `Ignition wait coast crossed into ${BODIES[ctx.state.cen].name}'s ` +
+              "SOI — shorten the wait or split the transfer.", "error");
+            return;
+          }
         }
       }
 
@@ -3315,13 +3339,13 @@
       const patchDv = V.sub(targeted.v1, ctx.state.v);
       const patchMag = V.mag(patchDv);
       if (patchMag > 1e-8) {
-        ctx.state.v = V.clone(targeted.v1);
-        ctx.totalDv += patchMag;
-        seg._info.dv += patchMag;
-        addEvent(ctx, segIdx, "burn",
+        // applyDv is the single supported impulse path: it keeps worldV /
+        // forceWorldV coherent and depletes propellant for the recorded dv.
+        const patchEvent = applyDv(ctx, segIdx, patchDv,
           `${body.name} SOI patch correction — Δv ${patchMag.toFixed(6)} km/s`,
-          { dv: patchMag, target: target.id, body: parentId,
-            patchCorrection: true });
+          { target: target.id });
+        patchEvent.patchCorrection = true;
+        seg._info.dv += patchMag;
         pushSample(ctx, segIdx);
       }
       seg._info.patchDv = patchMag;

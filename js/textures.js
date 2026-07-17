@@ -26,6 +26,7 @@
   const MAX_SPRITES = 60;
   const MAX_R = 300;               // max rendered sprite radius (px)
   const SPRITE_REFRESH_MS = 80;    // bound expensive CPU sphere rebuilds
+  let texVersion = 0;              // bumped per ingest so idle scenes repaint
 
   /* ------------------------- texture ingestion ------------------------- */
   function ingest(id, img) {
@@ -44,6 +45,7 @@
       delete mapCvs[id];
       delete _last[id];
       delete _lastBuildMs[id];
+      texVersion++;
     } catch (e) {
       // tainted canvas (shouldn't happen with data URIs) — ignore texture
       console.warn("Texture unusable for", id, e.message);
@@ -224,5 +226,6 @@
       ? A.bodyLatLon(body, nWorld, jd, spinOverride) : null;
   }
 
-  globalThis.MTPTex = { init, has, spriteFor, spinAt, bodyLatLon, mapCanvas, beginFrame };
+  globalThis.MTPTex = { init, has, spriteFor, spinAt, bodyLatLon, mapCanvas, beginFrame,
+    version: () => texVersion };
 })();

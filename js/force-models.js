@@ -536,6 +536,10 @@
     const direction = t1 >= t0 ? 1 : -1;
     const span = Math.abs(t1 - t0);
     const count = Math.floor(span / spacing + 32 * Number.EPSILON * Math.max(1, span / spacing));
+    // Fail before materializing: a tiny outputStep over a long span used to
+    // attempt a multi-gigabyte array instead of reporting the cap cleanly.
+    if (!Number.isFinite(count) || count + 2 > 1e6)
+      throw new Error("outputStep generates more than 1,000,000 output points.");
     const times = [];
     for (let index = 0; index <= count; index++) times.push(t0 + direction * index * spacing);
     const tolerance = 32 * Number.EPSILON * Math.max(1, span);
@@ -697,7 +701,8 @@
       appendPoint(outputT, outputY, result.tFinal, result.yFinal);
       for (const occurrence of result.events) {
         events.push(Object.assign({}, occurrence, { y: occurrence.y.slice(),
-          type: occurrence.name === DRY_EVENT_NAME ? "dry-mass-cutoff" : "terminal" }));
+          type: occurrence.name === DRY_EVENT_NAME ? "dry-mass-cutoff"
+            : occurrence.terminal ? "terminal" : "crossing" }));
       }
       for (const key of Object.keys(stats)) stats[key] += result.stats[key];
       currentT = result.tFinal;

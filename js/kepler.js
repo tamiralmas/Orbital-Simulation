@@ -574,8 +574,10 @@
     return state;
   }
 
-  // memo cache — cleared automatically when it grows
-  let _posCache = new Map();
+  // memo cache — evicts the oldest half when it grows. A wholesale reset
+  // used to drop the CURRENT epoch's entries mid-frame, so one animated
+  // paint could recompute the same body chain dozens of times.
+  const _posCache = new Map();
   function bodyWorld(bodyId, jd) {
     if (bodyId === "sun" || !BODIES[bodyId]) return [0, 0, 0];
     const key = bodyId + "|" + jd.toFixed(8);
@@ -584,7 +586,13 @@
     const body = BODIES[bodyId];
     const local = bodyLocalState(bodyId, jd).r;
     const world = V.add(bodyWorld(body.parent, jd), local);
-    if (_posCache.size > 20000) _posCache = new Map();
+    if (_posCache.size > 20000) {
+      let drop = 10000;
+      for (const oldKey of _posCache.keys()) {
+        _posCache.delete(oldKey);
+        if (--drop <= 0) break;
+      }
+    }
     _posCache.set(key, world);
     return world;
   }
