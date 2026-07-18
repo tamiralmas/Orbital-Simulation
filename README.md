@@ -330,5 +330,3 @@ global/multiple-revolution optimization, and operational orbit determination.
   detailed credits are embedded in generated `js/textures-data.js`.
 - Planner and Deep vector tables: NASA/JPL Horizons. Small-body elements:
   NASA/JPL Small-Body Database. Earth GP records: CelesTrak.
-
-Changelog: [CHANGELOG.md](CHANGELOG.md)
