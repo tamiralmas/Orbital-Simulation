@@ -3034,6 +3034,13 @@
     return AUTO_EVENT_PROFILES.default;
   }
 
+  // Auto owns the camera orientation: an orbit drag hands control back by
+  // turning Auto off, so Auto never has to preserve a manual angle. On engage
+  // it establishes a clean cinematic 3/4 view instead of inheriting whatever
+  // edge-on, top-down, or otherwise awkward orientation the camera was left
+  // at. These match createCamera()'s defaults in renderer.js.
+  const AUTO_CAM_YAW = -0.7;
+  const AUTO_CAM_PITCH = 0.42;
   function setAutoCam(on, silent) {
     if (S.autoCam === on) return;
     S.autoCam = on;
@@ -3048,6 +3055,10 @@
       exitTopView();
       setViewBtn(null);
       S.camera.pan = [0, 0, 0];
+      // Establish the directing angle now so the first shot is composed even
+      // while paused; the frame stamp changes, forcing an immediate repaint.
+      S.camera.yaw = AUTO_CAM_YAW;
+      S.camera.pitch = AUTO_CAM_PITCH;
       resetAutoCamera(true);
     }
   }
@@ -5468,6 +5479,10 @@ ephemerides: strict generated Horizons table or reviewed catalog fallback · GP:
       (exportSpacecraft && +exportSpacecraft.fovDeg) || 50)) * Math.PI / 180;
     if (camMode !== "pov" && camMode !== "current") cam2.fov = 50 * Math.PI / 180;
     if (camMode === "auto") {
+      // Match the live Auto camera's establishing angle so an exported GIF is
+      // composed the same way regardless of the live camera's orientation.
+      cam2.yaw = AUTO_CAM_YAW;
+      cam2.pitch = AUTO_CAM_PITCH;
       // converge onto the first shot instantly (dt≫τ) so the GIF doesn't
       // open with a slow drift in from wherever the live camera was
       const smp0 = ME.sampleAtTime(exportResult, times[0]);

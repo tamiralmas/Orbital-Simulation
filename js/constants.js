@@ -423,6 +423,6 @@
   globalThis.AstroConst = {
     AU, DAY, J2000_JD, DEG, BODIES, registerBody, childrenOf, isMinor,
     LAUNCH_SITES, launchSite,
-    VERSION: "1.25.0",
+    VERSION: "1.25.1",
   };
 })();
